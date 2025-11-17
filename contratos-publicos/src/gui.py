@@ -680,6 +680,26 @@ class ContratosPublicosGUI:
             command=self.iniciar_importacao
         ).pack(pady=20)
 
+        # Frame de progresso
+        progress_frame = ttk.LabelFrame(import_frame, text="Progresso", padding=10)
+        progress_frame.pack(fill=tk.X, padx=40, pady=(0, 10))
+
+        # Barra de progresso
+        self.import_progressbar = ttk.Progressbar(
+            progress_frame,
+            mode='determinate',
+            maximum=100
+        )
+        self.import_progressbar.pack(fill=tk.X, pady=(0, 5))
+
+        # Label de status
+        self.import_progress_label = ttk.Label(
+            progress_frame,
+            text="Aguardando início da importação...",
+            font=('Arial', 9)
+        )
+        self.import_progress_label.pack()
+
         # Área de log
         log_frame = ttk.LabelFrame(import_frame, text="Log de Importação", padding=10)
         log_frame.pack(fill=tk.BOTH, expand=True, padx=40, pady=10)
@@ -2265,6 +2285,9 @@ TOP 5 PARCEIROS:
     def _executar_importacao(self, fonte: str, limite: Optional[int], limite_tamanho_mb: Optional[int] = None):
         """Executa a importação em background"""
         try:
+            # Reset progress bar
+            self.update_import_progress(0, "Iniciando importação...")
+
             if fonte == 'csv':
                 self.log_import("Selecionando ficheiro CSV...")
                 csv_path = filedialog.askopenfilename(
@@ -2274,6 +2297,7 @@ TOP 5 PARCEIROS:
 
                 if not csv_path:
                     self.log_import("Importação cancelada")
+                    self.update_import_progress(0, "Importação cancelada")
                     return
 
                 from pathlib import Path
@@ -2291,11 +2315,23 @@ TOP 5 PARCEIROS:
                         self.log_import(f"Tamanho dentro do limite ({limite_tamanho_mb} MB)\n")
 
                 self.log_import(f"A processar: {csv_path.name}\n")
+                self.update_import_progress(5, f"A processar: {csv_path.name}")
 
-                contratos = self.scraper.parse_csv_contratos(csv_path, limit=limite, size_limit_mb=limite_tamanho_mb)
+                # Parse CSV com callback de progresso
+                contratos = self.scraper.parse_csv_contratos(
+                    csv_path,
+                    limit=limite,
+                    size_limit_mb=limite_tamanho_mb,
+                    progress_callback=self.update_import_progress
+                )
                 self.log_import(f"Parseados {len(contratos)} contratos\n")
 
-                stats = self.scraper.processar_lote_contratos(contratos, self.db)
+                # Processar contratos com callback de progresso
+                stats = self.scraper.processar_lote_contratos(
+                    contratos,
+                    self.db,
+                    progress_callback=self.update_import_progress
+                )
 
                 self.log_import("\n=== RESULTADO ===")
                 self.log_import(f"Total processados: {stats['total']}")
@@ -2305,6 +2341,7 @@ TOP 5 PARCEIROS:
 
                 # Verificar alertas
                 self.log_import("\nA verificar figuras de interesse...")
+                self.update_import_progress(100, "A verificar alertas...")
                 alertas = self.alerts_manager.verificar_novos_contratos(contratos)
                 self.log_import(f"Gerados {len(alertas)} alertas\n")
 
@@ -2317,6 +2354,7 @@ TOP 5 PARCEIROS:
                 self.log_import("=== IMPORTAÇÃO DO PORTAL BASE ===\n")
                 self.log_import("A descarregar contratos do Portal BASE (BASE.gov.pt)...")
                 self.log_import("AVISO: Downloads grandes podem demorar vários minutos!\n")
+                self.update_import_progress(0, "A descarregar do Portal BASE...")
 
                 # Perguntar o ano (opcional)
                 from tkinter import simpledialog
@@ -2339,6 +2377,7 @@ TOP 5 PARCEIROS:
                     )
                     if ano is None:  # User cancelled
                         self.log_import("Importação cancelada")
+                        self.update_import_progress(0, "Importação cancelada")
                         return
 
                 ano_str = str(ano) if ano else "TODOS"
@@ -2358,23 +2397,34 @@ TOP 5 PARCEIROS:
                     self.log_import("  1. Verificar a conexão")
                     self.log_import("  2. Escolher um ano específico (ficheiro menor)")
                     self.log_import("  3. Importar ficheiro CSV manualmente")
+                    self.update_import_progress(0, "Erro ao descarregar dados")
                     return
 
                 self.log_import(f"\nFicheiro descarregado: {csv_path}")
                 self.log_import("A processar contratos...\n")
+                self.update_import_progress(5, "Ficheiro descarregado, a processar...")
 
-                # Parse do CSV
-                contratos = self.scraper.parse_csv_contratos(Path(csv_path), limit=limite)
+                # Parse do CSV com callback de progresso
+                contratos = self.scraper.parse_csv_contratos(
+                    Path(csv_path),
+                    limit=limite,
+                    progress_callback=self.update_import_progress
+                )
                 self.log_import(f"Parseados {len(contratos)} contratos\n")
 
                 if not contratos:
                     self.log_import("\nERRO: Nenhum contrato encontrado no ficheiro")
                     self.log_import("O ficheiro pode estar vazio ou em formato incorreto")
+                    self.update_import_progress(0, "Erro: nenhum contrato encontrado")
                     return
 
-                # Processar e inserir na BD
+                # Processar e inserir na BD com callback de progresso
                 self.log_import("A inserir contratos na base de dados...")
-                stats = self.scraper.processar_lote_contratos(contratos, self.db)
+                stats = self.scraper.processar_lote_contratos(
+                    contratos,
+                    self.db,
+                    progress_callback=self.update_import_progress
+                )
 
                 self.log_import("\n=== RESULTADO ===")
                 self.log_import(f"Total processados: {stats['total']}")
@@ -2384,6 +2434,7 @@ TOP 5 PARCEIROS:
 
                 # Verificar alertas
                 self.log_import("\nA verificar figuras de interesse...")
+                self.update_import_progress(100, "A verificar alertas...")
                 alertas = self.alerts_manager.verificar_novos_contratos(contratos)
                 self.log_import(f"Gerados {len(alertas)} alertas\n")
 
@@ -2417,6 +2468,14 @@ TOP 5 PARCEIROS:
         self.import_log.insert(tk.END, mensagem + "\n")
         self.import_log.see(tk.END)
         self.import_log.update()
+
+    def update_import_progress(self, percentage: float, status: str):
+        """Atualiza a barra de progresso da importação (thread-safe)"""
+        def _update():
+            self.import_progressbar['value'] = percentage
+            self.import_progress_label['text'] = f"{percentage:.1f}% - {status}"
+
+        self.root.after(0, _update)
 
     # ==================== MÉTODOS DE MENU ====================
 

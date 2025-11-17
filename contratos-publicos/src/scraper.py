@@ -220,7 +220,9 @@ class ContratosPublicosScraper:
             logger.error(f"Erro ao descarregar do BASE: {e}")
             return None
 
-    def parse_csv_contratos(self, csv_path: Path, limit: Optional[int] = None) -> List[Dict[str, Any]]:
+    def parse_csv_contratos(self, csv_path: Path, limit: Optional[int] = None,
+                            size_limit_mb: Optional[int] = None,
+                            progress_callback: Optional[callable] = None) -> List[Dict[str, Any]]:
         """
         Faz parse de um ficheiro CSV de contratos
 
@@ -228,6 +230,8 @@ class ContratosPublicosScraper:
             csv_path: Caminho do ficheiro CSV
             limit: Limite de registos a processar (opcional)
             size_limit_mb: Limite de tamanho em MB a processar (opcional)
+            progress_callback: Função de callback para reportar progresso (opcional)
+                              Recebe (percentagem, mensagem)
 
         Returns:
             Lista de contratos
@@ -239,6 +243,9 @@ class ContratosPublicosScraper:
 
             # Calcular limite de bytes se size_limit_mb foi especificado
             size_limit_bytes = size_limit_mb * 1024 * 1024 if size_limit_mb else None
+
+            # Obter tamanho total do ficheiro para calcular progresso
+            file_size = csv_path.stat().st_size
 
             with open(csv_path, 'r', encoding='utf-8') as f:
                 # Detectar delimitador
@@ -255,17 +262,30 @@ class ContratosPublicosScraper:
                         logger.info(f"Limite de registos atingido: {limit}")
                         break
 
-                    # Verificar limite de tamanho (otimizado: apenas a cada 100 linhas para reduzir I/O)
-                    if size_limit_bytes and i % 100 == 0:
+                    # Verificar limite de tamanho e reportar progresso (a cada 100 linhas para eficiência)
+                    if i % 100 == 0:
                         current_pos = f.tell()
-                        if current_pos > size_limit_bytes:
+
+                        # Verificar limite de tamanho
+                        if size_limit_bytes and current_pos > size_limit_bytes:
                             logger.info(f"Limite de tamanho atingido: {size_limit_mb} MB (processados {current_pos / (1024*1024):.2f} MB)")
                             break
+
+                        # Reportar progresso
+                        if progress_callback:
+                            # Calcular percentagem baseada no tamanho do ficheiro lido
+                            effective_limit = min(file_size, size_limit_bytes) if size_limit_bytes else file_size
+                            percentage = min((current_pos / effective_limit) * 50, 50)  # 50% para parsing
+                            progress_callback(percentage, f"A processar CSV: {i} contratos lidos...")
 
                     # Mapear campos do CSV para o formato interno
                     contrato = self._mapear_campos_csv(row)
                     if contrato:
                         contratos.append(contrato)
+
+            # Reportar conclusão do parsing
+            if progress_callback:
+                progress_callback(50, f"CSV processado: {len(contratos)} contratos encontrados")
 
             logger.info(f"Processados {len(contratos)} contratos do CSV")
             return contratos
@@ -517,13 +537,16 @@ class ContratosPublicosScraper:
         return True
 
     def processar_lote_contratos(self, contratos: List[Dict[str, Any]],
-                                 db_manager) -> Dict[str, int]:
+                                 db_manager,
+                                 progress_callback: Optional[callable] = None) -> Dict[str, int]:
         """
         Processa um lote de contratos e insere na base de dados
 
         Args:
             contratos: Lista de contratos
             db_manager: Instância do DatabaseManager
+            progress_callback: Função de callback para reportar progresso (opcional)
+                              Recebe (percentagem, mensagem)
 
         Returns:
             Estatísticas do processamento
@@ -537,7 +560,8 @@ class ContratosPublicosScraper:
 
         logger.info(f"A processar lote de {len(contratos)} contratos...")
 
-        for contrato in tqdm(contratos, desc="Processando contratos"):
+        total = len(contratos)
+        for i, contrato in enumerate(contratos):
             if not self.validar_contrato(contrato):
                 stats['invalidos'] += 1
                 continue
@@ -546,6 +570,16 @@ class ContratosPublicosScraper:
                 stats['inseridos'] += 1
             else:
                 stats['duplicados'] += 1
+
+            # Reportar progresso (a cada 50 contratos para eficiência)
+            if progress_callback and i % 50 == 0:
+                # Os primeiros 50% foram para parsing, os próximos 50% são para inserção
+                percentage = 50 + ((i / total) * 50)
+                progress_callback(percentage, f"A inserir na base de dados: {i}/{total} contratos...")
+
+        # Reportar conclusão
+        if progress_callback:
+            progress_callback(100, f"Importação concluída: {stats['inseridos']} inseridos, {stats['duplicados']} duplicados")
 
         logger.info(f"Processamento concluído: {stats}")
         return stats
