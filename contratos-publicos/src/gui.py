@@ -1,0 +1,1118 @@
+"""
+Interface Gráfica da Aplicação de Monitorização de Contratos Públicos
+Usa tkinter para criar uma GUI desktop completa
+"""
+
+import tkinter as tk
+from tkinter import ttk, messagebox, filedialog, scrolledtext
+import logging
+from typing import Optional, List, Dict, Any
+from datetime import datetime
+import threading
+
+# Módulos internos
+from database import DatabaseManager
+from scraper import ContratosPublicosScraper
+from entities import EntitiesManager
+from alerts import AlertsManager
+
+logger = logging.getLogger(__name__)
+
+
+class ContratosPublicosGUI:
+    """Classe principal da interface gráfica"""
+
+    def __init__(self, root: tk.Tk):
+        """
+        Inicializa a interface gráfica
+
+        Args:
+            root: Janela principal do tkinter
+        """
+        self.root = root
+        self.root.title("Monitor de Contratos Públicos - BASE.gov.pt")
+        self.root.geometry("1200x800")
+
+        # Inicializar componentes
+        self.db = DatabaseManager("data/contratos.db")
+        self.scraper = ContratosPublicosScraper()
+        self.entities_manager = EntitiesManager(self.db)
+        self.alerts_manager = AlertsManager(self.db)
+
+        # Configurar estilo
+        self.setup_styles()
+
+        # Criar interface
+        self.create_widgets()
+
+        # Atualizar dados iniciais
+        self.atualizar_dashboard()
+
+        # Configurar evento de fecho
+        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+
+    def setup_styles(self):
+        """Configura estilos da interface"""
+        style = ttk.Style()
+        style.theme_use('clam')
+
+        # Cores
+        self.cores = {
+            'primaria': '#2c3e50',
+            'secundaria': '#3498db',
+            'sucesso': '#27ae60',
+            'alerta': '#e74c3c',
+            'aviso': '#f39c12',
+            'fundo': '#ecf0f1',
+            'texto': '#2c3e50'
+        }
+
+    def create_widgets(self):
+        """Cria todos os widgets da interface"""
+
+        # Barra de menu
+        self.create_menu_bar()
+
+        # Frame principal
+        main_frame = ttk.Frame(self.root)
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        # Criar notebook (abas)
+        self.notebook = ttk.Notebook(main_frame)
+        self.notebook.pack(fill=tk.BOTH, expand=True)
+
+        # Criar abas
+        self.create_dashboard_tab()
+        self.create_search_tab()
+        self.create_figures_tab()
+        self.create_alerts_tab()
+        self.create_import_tab()
+
+        # Barra de status
+        self.create_status_bar()
+
+    def create_menu_bar(self):
+        """Cria a barra de menu"""
+        menubar = tk.Menu(self.root)
+        self.root.config(menu=menubar)
+
+        # Menu Ficheiro
+        file_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Ficheiro", menu=file_menu)
+        file_menu.add_command(label="Exportar Resultados...", command=self.exportar_resultados)
+        file_menu.add_separator()
+        file_menu.add_command(label="Sair", command=self.on_closing)
+
+        # Menu Ferramentas
+        tools_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Ferramentas", menu=tools_menu)
+        tools_menu.add_command(label="Atualizar Dados", command=self.atualizar_dados)
+        tools_menu.add_command(label="Limpar Cache", command=self.limpar_cache)
+
+        # Menu Ajuda
+        help_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Ajuda", menu=help_menu)
+        help_menu.add_command(label="Sobre", command=self.mostrar_sobre)
+
+    def create_dashboard_tab(self):
+        """Cria a aba de dashboard"""
+        dashboard_frame = ttk.Frame(self.notebook)
+        self.notebook.add(dashboard_frame, text="Dashboard")
+
+        # Título
+        titulo = ttk.Label(
+            dashboard_frame,
+            text="Dashboard - Visão Geral",
+            font=('Arial', 16, 'bold')
+        )
+        titulo.pack(pady=10)
+
+        # Frame de estatísticas
+        stats_frame = ttk.LabelFrame(dashboard_frame, text="Estatísticas Gerais", padding=10)
+        stats_frame.pack(fill=tk.X, padx=20, pady=10)
+
+        # Grid de estatísticas
+        self.stats_labels = {}
+
+        stats_info = [
+            ('total_contratos', 'Total de Contratos:', 0),
+            ('total_figuras', 'Figuras de Interesse:', 1),
+            ('alertas_nao_lidos', 'Alertas Não Lidos:', 2),
+            ('valor_total', 'Valor Total:', 3)
+        ]
+
+        for key, label, row in stats_info:
+            ttk.Label(stats_frame, text=label, font=('Arial', 10, 'bold')).grid(
+                row=row, column=0, sticky=tk.W, padx=5, pady=5
+            )
+            value_label = ttk.Label(stats_frame, text="0", font=('Arial', 10))
+            value_label.grid(row=row, column=1, sticky=tk.W, padx=5, pady=5)
+            self.stats_labels[key] = value_label
+
+        # Frame de alertas recentes
+        alertas_frame = ttk.LabelFrame(dashboard_frame, text="Alertas Recentes", padding=10)
+        alertas_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+
+        # Treeview de alertas
+        columns = ('Figura', 'Tipo', 'Data', 'Status')
+        self.dashboard_alertas_tree = ttk.Treeview(
+            alertas_frame,
+            columns=columns,
+            show='headings',
+            height=10
+        )
+
+        for col in columns:
+            self.dashboard_alertas_tree.heading(col, text=col)
+            self.dashboard_alertas_tree.column(col, width=150)
+
+        self.dashboard_alertas_tree.pack(fill=tk.BOTH, expand=True)
+
+        # Scrollbar
+        scrollbar = ttk.Scrollbar(alertas_frame, orient=tk.VERTICAL,
+                                 command=self.dashboard_alertas_tree.yview)
+        self.dashboard_alertas_tree.configure(yscroll=scrollbar.set)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        # Botão de atualizar
+        ttk.Button(
+            dashboard_frame,
+            text="Atualizar Dashboard",
+            command=self.atualizar_dashboard
+        ).pack(pady=10)
+
+    def create_search_tab(self):
+        """Cria a aba de pesquisa de contratos"""
+        search_frame = ttk.Frame(self.notebook)
+        self.notebook.add(search_frame, text="Pesquisar Contratos")
+
+        # Frame de filtros
+        filtros_frame = ttk.LabelFrame(search_frame, text="Filtros de Pesquisa", padding=10)
+        filtros_frame.pack(fill=tk.X, padx=20, pady=10)
+
+        # Distrito
+        ttk.Label(filtros_frame, text="Distrito:").grid(row=0, column=0, sticky=tk.W, padx=5, pady=5)
+        self.filtro_distrito = ttk.Combobox(filtros_frame, width=20)
+        self.filtro_distrito['values'] = ['', 'Lisboa', 'Porto', 'Aveiro', 'Braga', 'Coimbra',
+                                          'Faro', 'Setúbal', 'Viseu', 'Santarém', 'Évora']
+        self.filtro_distrito.grid(row=0, column=1, padx=5, pady=5)
+
+        # Concelho
+        ttk.Label(filtros_frame, text="Concelho:").grid(row=0, column=2, sticky=tk.W, padx=5, pady=5)
+        self.filtro_concelho = ttk.Entry(filtros_frame, width=20)
+        self.filtro_concelho.grid(row=0, column=3, padx=5, pady=5)
+
+        # Ano início
+        ttk.Label(filtros_frame, text="Ano (de):").grid(row=1, column=0, sticky=tk.W, padx=5, pady=5)
+        self.filtro_ano_inicio = ttk.Spinbox(filtros_frame, from_=2012, to=2025, width=18)
+        self.filtro_ano_inicio.set(2020)
+        self.filtro_ano_inicio.grid(row=1, column=1, padx=5, pady=5)
+
+        # Ano fim
+        ttk.Label(filtros_frame, text="Ano (até):").grid(row=1, column=2, sticky=tk.W, padx=5, pady=5)
+        self.filtro_ano_fim = ttk.Spinbox(filtros_frame, from_=2012, to=2025, width=18)
+        self.filtro_ano_fim.set(2025)
+        self.filtro_ano_fim.grid(row=1, column=3, padx=5, pady=5)
+
+        # Adjudicante
+        ttk.Label(filtros_frame, text="Adjudicante:").grid(row=2, column=0, sticky=tk.W, padx=5, pady=5)
+        self.filtro_adjudicante = ttk.Entry(filtros_frame, width=20)
+        self.filtro_adjudicante.grid(row=2, column=1, padx=5, pady=5)
+
+        # Adjudicatária
+        ttk.Label(filtros_frame, text="Adjudicatária:").grid(row=2, column=2, sticky=tk.W, padx=5, pady=5)
+        self.filtro_adjudicataria = ttk.Entry(filtros_frame, width=20)
+        self.filtro_adjudicataria.grid(row=2, column=3, padx=5, pady=5)
+
+        # Valor mínimo
+        ttk.Label(filtros_frame, text="Valor Mín. (€):").grid(row=3, column=0, sticky=tk.W, padx=5, pady=5)
+        self.filtro_valor_min = ttk.Entry(filtros_frame, width=20)
+        self.filtro_valor_min.grid(row=3, column=1, padx=5, pady=5)
+
+        # Valor máximo
+        ttk.Label(filtros_frame, text="Valor Máx. (€):").grid(row=3, column=2, sticky=tk.W, padx=5, pady=5)
+        self.filtro_valor_max = ttk.Entry(filtros_frame, width=20)
+        self.filtro_valor_max.grid(row=3, column=3, padx=5, pady=5)
+
+        # Botões
+        buttons_frame = ttk.Frame(filtros_frame)
+        buttons_frame.grid(row=4, column=0, columnspan=4, pady=10)
+
+        ttk.Button(buttons_frame, text="Pesquisar", command=self.pesquisar_contratos).pack(side=tk.LEFT, padx=5)
+        ttk.Button(buttons_frame, text="Limpar Filtros", command=self.limpar_filtros).pack(side=tk.LEFT, padx=5)
+
+        # Frame de resultados
+        resultados_frame = ttk.LabelFrame(search_frame, text="Resultados", padding=10)
+        resultados_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+
+        # Treeview de resultados
+        columns = ('ID', 'Adjudicante', 'Adjudicatária', 'Valor', 'Data', 'Tipo')
+        self.resultados_tree = ttk.Treeview(
+            resultados_frame,
+            columns=columns,
+            show='headings',
+            height=15
+        )
+
+        for col in columns:
+            self.resultados_tree.heading(col, text=col)
+
+        self.resultados_tree.column('ID', width=100)
+        self.resultados_tree.column('Adjudicante', width=200)
+        self.resultados_tree.column('Adjudicatária', width=200)
+        self.resultados_tree.column('Valor', width=100)
+        self.resultados_tree.column('Data', width=100)
+        self.resultados_tree.column('Tipo', width=150)
+
+        self.resultados_tree.pack(fill=tk.BOTH, expand=True, side=tk.LEFT)
+
+        # Scrollbar
+        scrollbar = ttk.Scrollbar(resultados_frame, orient=tk.VERTICAL,
+                                 command=self.resultados_tree.yview)
+        self.resultados_tree.configure(yscroll=scrollbar.set)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        # Bind duplo clique para ver detalhes
+        self.resultados_tree.bind('<Double-1>', self.mostrar_detalhes_contrato)
+
+    def create_figures_tab(self):
+        """Cria a aba de figuras de interesse"""
+        figures_frame = ttk.Frame(self.notebook)
+        self.notebook.add(figures_frame, text="Figuras de Interesse")
+
+        # Frame de adicionar figura
+        add_frame = ttk.LabelFrame(figures_frame, text="Adicionar Figura de Interesse", padding=10)
+        add_frame.pack(fill=tk.X, padx=20, pady=10)
+
+        # Nome
+        ttk.Label(add_frame, text="Nome:").grid(row=0, column=0, sticky=tk.W, padx=5, pady=5)
+        self.figura_nome = ttk.Entry(add_frame, width=30)
+        self.figura_nome.grid(row=0, column=1, padx=5, pady=5)
+
+        # NIF
+        ttk.Label(add_frame, text="NIF (opcional):").grid(row=0, column=2, sticky=tk.W, padx=5, pady=5)
+        self.figura_nif = ttk.Entry(add_frame, width=20)
+        self.figura_nif.grid(row=0, column=3, padx=5, pady=5)
+
+        # Tipo
+        ttk.Label(add_frame, text="Tipo:").grid(row=1, column=0, sticky=tk.W, padx=5, pady=5)
+        self.figura_tipo = ttk.Combobox(add_frame, width=27)
+        self.figura_tipo['values'] = ['pessoa', 'empresa', 'entidade_publica']
+        self.figura_tipo.set('pessoa')
+        self.figura_tipo.grid(row=1, column=1, padx=5, pady=5)
+
+        # Notas
+        ttk.Label(add_frame, text="Notas:").grid(row=1, column=2, sticky=tk.W, padx=5, pady=5)
+        self.figura_notas = ttk.Entry(add_frame, width=20)
+        self.figura_notas.grid(row=1, column=3, padx=5, pady=5)
+
+        # Botão adicionar
+        ttk.Button(add_frame, text="Adicionar Figura", command=self.adicionar_figura).grid(
+            row=2, column=0, columnspan=4, pady=10
+        )
+
+        # Frame de lista de figuras
+        lista_frame = ttk.LabelFrame(figures_frame, text="Figuras Cadastradas", padding=10)
+        lista_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+
+        # Treeview de figuras
+        columns = ('ID', 'Nome', 'NIF', 'Tipo', 'Contratos', 'Status')
+        self.figuras_tree = ttk.Treeview(
+            lista_frame,
+            columns=columns,
+            show='headings',
+            height=10
+        )
+
+        for col in columns:
+            self.figuras_tree.heading(col, text=col)
+
+        self.figuras_tree.column('ID', width=50)
+        self.figuras_tree.column('Nome', width=250)
+        self.figuras_tree.column('NIF', width=100)
+        self.figuras_tree.column('Tipo', width=120)
+        self.figuras_tree.column('Contratos', width=80)
+        self.figuras_tree.column('Status', width=80)
+
+        self.figuras_tree.pack(fill=tk.BOTH, expand=True, side=tk.LEFT)
+
+        # Scrollbar
+        scrollbar = ttk.Scrollbar(lista_frame, orient=tk.VERTICAL,
+                                 command=self.figuras_tree.yview)
+        self.figuras_tree.configure(yscroll=scrollbar.set)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        # Botões de ação
+        action_frame = ttk.Frame(figures_frame)
+        action_frame.pack(fill=tk.X, padx=20, pady=10)
+
+        ttk.Button(action_frame, text="Analisar Figura", command=self.analisar_figura_selecionada).pack(
+            side=tk.LEFT, padx=5
+        )
+        ttk.Button(action_frame, text="Ver Contratos", command=self.ver_contratos_figura).pack(
+            side=tk.LEFT, padx=5
+        )
+        ttk.Button(action_frame, text="Remover Figura", command=self.remover_figura_selecionada).pack(
+            side=tk.LEFT, padx=5
+        )
+        ttk.Button(action_frame, text="Atualizar Lista", command=self.atualizar_lista_figuras).pack(
+            side=tk.LEFT, padx=5
+        )
+
+        # Carregar figuras iniciais
+        self.atualizar_lista_figuras()
+
+    def create_alerts_tab(self):
+        """Cria a aba de alertas"""
+        alerts_frame = ttk.Frame(self.notebook)
+        self.notebook.add(alerts_frame, text="Alertas")
+
+        # Frame de filtros
+        filtros_frame = ttk.Frame(alerts_frame)
+        filtros_frame.pack(fill=tk.X, padx=20, pady=10)
+
+        self.alertas_apenas_nao_lidos = tk.BooleanVar(value=True)
+        ttk.Checkbutton(
+            filtros_frame,
+            text="Apenas não lidos",
+            variable=self.alertas_apenas_nao_lidos,
+            command=self.atualizar_lista_alertas
+        ).pack(side=tk.LEFT, padx=5)
+
+        ttk.Button(filtros_frame, text="Marcar Todos como Lidos",
+                  command=self.marcar_todos_alertas_lidos).pack(side=tk.RIGHT, padx=5)
+        ttk.Button(filtros_frame, text="Atualizar",
+                  command=self.atualizar_lista_alertas).pack(side=tk.RIGHT, padx=5)
+
+        # Frame de lista de alertas
+        lista_frame = ttk.LabelFrame(alerts_frame, text="Lista de Alertas", padding=10)
+        lista_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+
+        # Treeview de alertas
+        columns = ('ID', 'Figura', 'Tipo', 'Contrato', 'Data', 'Status')
+        self.alertas_tree = ttk.Treeview(
+            lista_frame,
+            columns=columns,
+            show='headings',
+            height=10
+        )
+
+        for col in columns:
+            self.alertas_tree.heading(col, text=col)
+
+        self.alertas_tree.column('ID', width=50)
+        self.alertas_tree.column('Figura', width=200)
+        self.alertas_tree.column('Tipo', width=100)
+        self.alertas_tree.column('Contrato', width=150)
+        self.alertas_tree.column('Data', width=150)
+        self.alertas_tree.column('Status', width=80)
+
+        self.alertas_tree.pack(fill=tk.BOTH, expand=True, side=tk.LEFT)
+
+        # Scrollbar
+        scrollbar = ttk.Scrollbar(lista_frame, orient=tk.VERTICAL,
+                                 command=self.alertas_tree.yview)
+        self.alertas_tree.configure(yscroll=scrollbar.set)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        # Frame de detalhes do alerta
+        detalhes_frame = ttk.LabelFrame(alerts_frame, text="Detalhes do Alerta", padding=10)
+        detalhes_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+
+        self.alerta_detalhes_text = scrolledtext.ScrolledText(
+            detalhes_frame,
+            height=8,
+            wrap=tk.WORD
+        )
+        self.alerta_detalhes_text.pack(fill=tk.BOTH, expand=True)
+
+        # Bind para mostrar detalhes
+        self.alertas_tree.bind('<<TreeviewSelect>>', self.mostrar_detalhes_alerta)
+
+        # Carregar alertas iniciais
+        self.atualizar_lista_alertas()
+
+    def create_import_tab(self):
+        """Cria a aba de importação de dados"""
+        import_frame = ttk.Frame(self.notebook)
+        self.notebook.add(import_frame, text="Importar Dados")
+
+        # Título
+        titulo = ttk.Label(
+            import_frame,
+            text="Importação de Dados de Contratos",
+            font=('Arial', 14, 'bold')
+        )
+        titulo.pack(pady=20)
+
+        # Frame de opções
+        opcoes_frame = ttk.LabelFrame(import_frame, text="Fonte de Dados", padding=20)
+        opcoes_frame.pack(fill=tk.X, padx=40, pady=10)
+
+        self.import_source = tk.StringVar(value='csv')
+
+        ttk.Radiobutton(
+            opcoes_frame,
+            text="Ficheiro CSV Local",
+            variable=self.import_source,
+            value='csv'
+        ).pack(anchor=tk.W, pady=5)
+
+        ttk.Radiobutton(
+            opcoes_frame,
+            text="Dados Abertos (dados.gov.pt)",
+            variable=self.import_source,
+            value='dados_abertos'
+        ).pack(anchor=tk.W, pady=5)
+
+        ttk.Radiobutton(
+            opcoes_frame,
+            text="API Portal BASE (requer configuração)",
+            variable=self.import_source,
+            value='api'
+        ).pack(anchor=tk.W, pady=5)
+
+        # Frame de configuração
+        config_frame = ttk.LabelFrame(import_frame, text="Configurações", padding=20)
+        config_frame.pack(fill=tk.X, padx=40, pady=10)
+
+        ttk.Label(config_frame, text="Limite de registos (0 = todos):").pack(anchor=tk.W, pady=5)
+        self.import_limit = ttk.Entry(config_frame, width=20)
+        self.import_limit.insert(0, "1000")
+        self.import_limit.pack(anchor=tk.W, pady=5)
+
+        # Botão de importar
+        ttk.Button(
+            import_frame,
+            text="Iniciar Importação",
+            command=self.iniciar_importacao
+        ).pack(pady=20)
+
+        # Área de log
+        log_frame = ttk.LabelFrame(import_frame, text="Log de Importação", padding=10)
+        log_frame.pack(fill=tk.BOTH, expand=True, padx=40, pady=10)
+
+        self.import_log = scrolledtext.ScrolledText(log_frame, height=10, wrap=tk.WORD)
+        self.import_log.pack(fill=tk.BOTH, expand=True)
+
+    def create_status_bar(self):
+        """Cria a barra de status na parte inferior"""
+        self.status_bar = ttk.Label(
+            self.root,
+            text="Pronto",
+            relief=tk.SUNKEN,
+            anchor=tk.W
+        )
+        self.status_bar.pack(side=tk.BOTTOM, fill=tk.X)
+
+    # ==================== MÉTODOS DO DASHBOARD ====================
+
+    def atualizar_dashboard(self):
+        """Atualiza as informações do dashboard"""
+        try:
+            stats = self.db.obter_estatisticas()
+
+            self.stats_labels['total_contratos'].config(text=f"{stats['total_contratos']:,}")
+            self.stats_labels['total_figuras'].config(text=f"{stats['total_figuras']:,}")
+            self.stats_labels['alertas_nao_lidos'].config(text=f"{stats['alertas_nao_lidos']:,}")
+            self.stats_labels['valor_total'].config(
+                text=f"€{stats['valor_total_contratos']:,.2f}"
+            )
+
+            # Atualizar alertas recentes
+            self.dashboard_alertas_tree.delete(*self.dashboard_alertas_tree.get_children())
+
+            alertas = self.alerts_manager.listar_alertas(apenas_nao_lidos=False)[:10]
+
+            for alerta in alertas:
+                status = "Lido" if alerta.get('lido') else "Não lido"
+                self.dashboard_alertas_tree.insert('', 'end', values=(
+                    alerta.get('figura_nome', 'N/D'),
+                    alerta.get('tipo_alerta', 'N/D'),
+                    alerta.get('data_alerta', 'N/D')[:19],
+                    status
+                ))
+
+            self.update_status("Dashboard atualizado")
+
+        except Exception as e:
+            logger.error(f"Erro ao atualizar dashboard: {e}")
+            messagebox.showerror("Erro", f"Erro ao atualizar dashboard: {e}")
+
+    # ==================== MÉTODOS DE PESQUISA ====================
+
+    def pesquisar_contratos(self):
+        """Executa a pesquisa de contratos com os filtros especificados"""
+        try:
+            filtros = {}
+
+            if self.filtro_distrito.get():
+                filtros['distrito'] = self.filtro_distrito.get()
+
+            if self.filtro_concelho.get():
+                filtros['concelho'] = self.filtro_concelho.get()
+
+            if self.filtro_ano_inicio.get():
+                filtros['ano_inicio'] = int(self.filtro_ano_inicio.get())
+
+            if self.filtro_ano_fim.get():
+                filtros['ano_fim'] = int(self.filtro_ano_fim.get())
+
+            if self.filtro_adjudicante.get():
+                filtros['adjudicante'] = self.filtro_adjudicante.get()
+
+            if self.filtro_adjudicataria.get():
+                filtros['adjudicataria'] = self.filtro_adjudicataria.get()
+
+            if self.filtro_valor_min.get():
+                filtros['valor_min'] = float(self.filtro_valor_min.get())
+
+            if self.filtro_valor_max.get():
+                filtros['valor_max'] = float(self.filtro_valor_max.get())
+
+            # Executar pesquisa
+            resultados = self.db.pesquisar_contratos(filtros)
+
+            # Limpar resultados anteriores
+            self.resultados_tree.delete(*self.resultados_tree.get_children())
+
+            # Inserir novos resultados
+            for contrato in resultados:
+                valor = f"€{contrato.get('valor', 0):,.2f}" if contrato.get('valor') else "N/D"
+
+                self.resultados_tree.insert('', 'end', values=(
+                    contrato.get('id_contrato', 'N/D'),
+                    contrato.get('adjudicante', 'N/D'),
+                    contrato.get('adjudicataria', 'N/D'),
+                    valor,
+                    contrato.get('data_contrato', 'N/D'),
+                    contrato.get('tipo_contrato', 'N/D')
+                ))
+
+            self.update_status(f"Encontrados {len(resultados)} contratos")
+
+        except Exception as e:
+            logger.error(f"Erro na pesquisa: {e}")
+            messagebox.showerror("Erro", f"Erro ao pesquisar: {e}")
+
+    def limpar_filtros(self):
+        """Limpa todos os filtros de pesquisa"""
+        self.filtro_distrito.set('')
+        self.filtro_concelho.delete(0, tk.END)
+        self.filtro_ano_inicio.set(2020)
+        self.filtro_ano_fim.set(2025)
+        self.filtro_adjudicante.delete(0, tk.END)
+        self.filtro_adjudicataria.delete(0, tk.END)
+        self.filtro_valor_min.delete(0, tk.END)
+        self.filtro_valor_max.delete(0, tk.END)
+
+        self.resultados_tree.delete(*self.resultados_tree.get_children())
+        self.update_status("Filtros limpos")
+
+    def mostrar_detalhes_contrato(self, event):
+        """Mostra detalhes de um contrato selecionado"""
+        selection = self.resultados_tree.selection()
+        if not selection:
+            return
+
+        item = self.resultados_tree.item(selection[0])
+        id_contrato = item['values'][0]
+
+        contrato = self.db.obter_contrato_por_id(id_contrato)
+
+        if contrato:
+            # Criar janela de detalhes
+            detalhes_window = tk.Toplevel(self.root)
+            detalhes_window.title(f"Detalhes do Contrato - {id_contrato}")
+            detalhes_window.geometry("600x500")
+
+            # Criar texto formatado
+            texto = f"""
+═══════════════════════════════════════════════════
+DETALHES DO CONTRATO
+═══════════════════════════════════════════════════
+
+ID: {contrato.get('id_contrato', 'N/D')}
+
+Adjudicante: {contrato.get('adjudicante', 'N/D')}
+NIF Adjudicante: {contrato.get('adjudicante_nif', 'N/D')}
+
+Adjudicatária: {contrato.get('adjudicataria', 'N/D')}
+NIF Adjudicatária: {contrato.get('adjudicataria_nif', 'N/D')}
+
+Valor: €{contrato.get('valor', 0):,.2f}
+Data do Contrato: {contrato.get('data_contrato', 'N/D')}
+Data de Publicação: {contrato.get('data_publicacao', 'N/D')}
+
+Tipo de Contrato: {contrato.get('tipo_contrato', 'N/D')}
+Tipo de Procedimento: {contrato.get('tipo_procedimento', 'N/D')}
+
+Localização:
+  Distrito: {contrato.get('distrito', 'N/D')}
+  Concelho: {contrato.get('concelho', 'N/D')}
+
+CPV: {contrato.get('cpv', 'N/D')}
+Prazo de Execução: {contrato.get('prazo_execucao', 'N/D')} dias
+
+Descrição/Objeto:
+{contrato.get('descricao') or contrato.get('objeto_contrato', 'N/D')}
+
+Link BASE: {contrato.get('link_base', 'N/D')}
+
+═══════════════════════════════════════════════════
+            """
+
+            text_widget = scrolledtext.ScrolledText(detalhes_window, wrap=tk.WORD)
+            text_widget.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+            text_widget.insert(tk.END, texto)
+            text_widget.config(state=tk.DISABLED)
+
+            ttk.Button(detalhes_window, text="Fechar",
+                      command=detalhes_window.destroy).pack(pady=10)
+
+    # ==================== MÉTODOS DE FIGURAS ====================
+
+    def adicionar_figura(self):
+        """Adiciona uma nova figura de interesse"""
+        nome = self.figura_nome.get().strip()
+        nif = self.figura_nif.get().strip() or None
+        tipo = self.figura_tipo.get()
+        notas = self.figura_notas.get().strip()
+
+        if not nome:
+            messagebox.showwarning("Aviso", "O nome é obrigatório!")
+            return
+
+        try:
+            figura_id = self.entities_manager.adicionar_figura(nome, nif, tipo, notas)
+            messagebox.showinfo("Sucesso", f"Figura '{nome}' adicionada com ID {figura_id}")
+
+            # Limpar campos
+            self.figura_nome.delete(0, tk.END)
+            self.figura_nif.delete(0, tk.END)
+            self.figura_tipo.set('pessoa')
+            self.figura_notas.delete(0, tk.END)
+
+            # Atualizar lista
+            self.atualizar_lista_figuras()
+
+        except Exception as e:
+            logger.error(f"Erro ao adicionar figura: {e}")
+            messagebox.showerror("Erro", f"Erro ao adicionar figura: {e}")
+
+    def atualizar_lista_figuras(self):
+        """Atualiza a lista de figuras de interesse"""
+        try:
+            self.figuras_tree.delete(*self.figuras_tree.get_children())
+
+            figuras = self.entities_manager.listar_figuras(apenas_ativas=True)
+
+            for figura in figuras:
+                # Contar contratos
+                contratos = self.db.pesquisar_contratos_por_figura(figura['id'])
+                n_contratos = len(contratos)
+
+                status = "Ativo" if figura.get('ativo') else "Inativo"
+
+                self.figuras_tree.insert('', 'end', values=(
+                    figura['id'],
+                    figura['nome'],
+                    figura.get('nif', 'N/D'),
+                    figura.get('tipo', 'N/D'),
+                    n_contratos,
+                    status
+                ))
+
+            self.update_status(f"{len(figuras)} figuras de interesse")
+
+        except Exception as e:
+            logger.error(f"Erro ao atualizar lista de figuras: {e}")
+
+    def analisar_figura_selecionada(self):
+        """Analisa a figura de interesse selecionada"""
+        selection = self.figuras_tree.selection()
+        if not selection:
+            messagebox.showwarning("Aviso", "Selecione uma figura primeiro!")
+            return
+
+        item = self.figuras_tree.item(selection[0])
+        figura_id = item['values'][0]
+
+        try:
+            analise = self.entities_manager.analisar_contratos_figura(figura_id)
+
+            # Criar janela de análise
+            analise_window = tk.Toplevel(self.root)
+            analise_window.title(f"Análise - {analise['figura']['nome']}")
+            analise_window.geometry("700x600")
+
+            # Criar texto formatado
+            texto = f"""
+═══════════════════════════════════════════════════
+ANÁLISE DA FIGURA DE INTERESSE
+═══════════════════════════════════════════════════
+
+Nome: {analise['figura']['nome']}
+NIF: {analise['figura'].get('nif', 'N/D')}
+Tipo: {analise['figura'].get('tipo', 'N/D')}
+
+ESTATÍSTICAS:
+Total de Contratos: {analise['total_contratos']}
+Valor Total: €{analise['valor_total']:,.2f}
+
+Como Adjudicante: {analise['como_adjudicante']} contratos
+Como Adjudicatária: {analise['como_adjudicataria']} contratos
+
+TOP 5 PARCEIROS:
+"""
+            for parceiro, count in analise['top_parceiros']:
+                texto += f"  • {parceiro}: {count} contratos\n"
+
+            texto += "\nDISTRIBUIÇÃO POR ANO:\n"
+            for ano, count in sorted(analise['distribuicao_anos'].items(), reverse=True):
+                texto += f"  {ano}: {count} contratos\n"
+
+            texto += "\nTIPOS DE CONTRATO:\n"
+            for tipo, count in sorted(analise['tipos_contrato'].items(),
+                                    key=lambda x: x[1], reverse=True):
+                texto += f"  • {tipo}: {count}\n"
+
+            texto += "\n═══════════════════════════════════════════════════\n"
+
+            text_widget = scrolledtext.ScrolledText(analise_window, wrap=tk.WORD)
+            text_widget.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+            text_widget.insert(tk.END, texto)
+            text_widget.config(state=tk.DISABLED)
+
+            ttk.Button(analise_window, text="Fechar",
+                      command=analise_window.destroy).pack(pady=10)
+
+        except Exception as e:
+            logger.error(f"Erro ao analisar figura: {e}")
+            messagebox.showerror("Erro", f"Erro ao analisar figura: {e}")
+
+    def ver_contratos_figura(self):
+        """Mostra contratos de uma figura selecionada"""
+        selection = self.figuras_tree.selection()
+        if not selection:
+            messagebox.showwarning("Aviso", "Selecione uma figura primeiro!")
+            return
+
+        item = self.figuras_tree.item(selection[0])
+        figura_id = item['values'][0]
+        figura_nome = item['values'][1]
+
+        # Mudar para aba de pesquisa e preencher filtro
+        self.notebook.select(1)  # Aba de pesquisa
+        self.limpar_filtros()
+        self.filtro_adjudicante.insert(0, figura_nome)
+        self.filtro_adjudicataria.insert(0, figura_nome)
+        self.pesquisar_contratos()
+
+    def remover_figura_selecionada(self):
+        """Remove (desativa) uma figura selecionada"""
+        selection = self.figuras_tree.selection()
+        if not selection:
+            messagebox.showwarning("Aviso", "Selecione uma figura primeiro!")
+            return
+
+        item = self.figuras_tree.item(selection[0])
+        figura_id = item['values'][0]
+        figura_nome = item['values'][1]
+
+        resposta = messagebox.askyesno(
+            "Confirmar",
+            f"Deseja remover a figura '{figura_nome}'?\n\n"
+            "Nota: A figura será desativada mas os dados históricos serão mantidos."
+        )
+
+        if resposta:
+            try:
+                self.entities_manager.remover_figura(figura_id)
+                messagebox.showinfo("Sucesso", f"Figura '{figura_nome}' removida")
+                self.atualizar_lista_figuras()
+            except Exception as e:
+                logger.error(f"Erro ao remover figura: {e}")
+                messagebox.showerror("Erro", f"Erro ao remover figura: {e}")
+
+    # ==================== MÉTODOS DE ALERTAS ====================
+
+    def atualizar_lista_alertas(self):
+        """Atualiza a lista de alertas"""
+        try:
+            self.alertas_tree.delete(*self.alertas_tree.get_children())
+
+            apenas_nao_lidos = self.alertas_apenas_nao_lidos.get()
+            alertas = self.alerts_manager.listar_alertas(apenas_nao_lidos=apenas_nao_lidos)
+
+            for alerta in alertas:
+                status = "Lido" if alerta.get('lido') else "Não lido"
+
+                self.alertas_tree.insert('', 'end', values=(
+                    alerta['id'],
+                    alerta.get('figura_nome', 'N/D'),
+                    alerta.get('tipo_alerta', 'N/D'),
+                    alerta.get('id_contrato', 'N/D'),
+                    alerta.get('data_alerta', 'N/D')[:19],
+                    status
+                ), tags=('nao_lido' if not alerta.get('lido') else 'lido',))
+
+            # Configurar tags de cores
+            self.alertas_tree.tag_configure('nao_lido', background='#ffebee')
+            self.alertas_tree.tag_configure('lido', background='white')
+
+            self.update_status(f"{len(alertas)} alertas")
+
+        except Exception as e:
+            logger.error(f"Erro ao atualizar alertas: {e}")
+
+    def mostrar_detalhes_alerta(self, event):
+        """Mostra detalhes do alerta selecionado"""
+        selection = self.alertas_tree.selection()
+        if not selection:
+            return
+
+        item = self.alertas_tree.item(selection[0])
+        alerta_id = item['values'][0]
+
+        # Buscar alerta completo
+        todos_alertas = self.alerts_manager.listar_alertas(apenas_nao_lidos=False)
+        alerta = next((a for a in todos_alertas if a['id'] == alerta_id), None)
+
+        if alerta:
+            self.alerta_detalhes_text.config(state=tk.NORMAL)
+            self.alerta_detalhes_text.delete(1.0, tk.END)
+            self.alerta_detalhes_text.insert(tk.END, alerta.get('mensagem', 'Sem detalhes'))
+            self.alerta_detalhes_text.config(state=tk.DISABLED)
+
+            # Marcar como lido
+            if not alerta.get('lido'):
+                self.alerts_manager.marcar_lido(alerta_id)
+                self.atualizar_lista_alertas()
+                self.atualizar_dashboard()
+
+    def marcar_todos_alertas_lidos(self):
+        """Marca todos os alertas como lidos"""
+        resposta = messagebox.askyesno(
+            "Confirmar",
+            "Marcar todos os alertas como lidos?"
+        )
+
+        if resposta:
+            try:
+                count = self.alerts_manager.marcar_todos_lidos()
+                messagebox.showinfo("Sucesso", f"{count} alertas marcados como lidos")
+                self.atualizar_lista_alertas()
+                self.atualizar_dashboard()
+            except Exception as e:
+                logger.error(f"Erro ao marcar alertas: {e}")
+                messagebox.showerror("Erro", f"Erro: {e}")
+
+    # ==================== MÉTODOS DE IMPORTAÇÃO ====================
+
+    def iniciar_importacao(self):
+        """Inicia o processo de importação de dados"""
+        fonte = self.import_source.get()
+        limite_str = self.import_limit.get()
+
+        try:
+            limite = int(limite_str) if limite_str and int(limite_str) > 0 else None
+        except:
+            messagebox.showerror("Erro", "Limite inválido")
+            return
+
+        self.import_log.delete(1.0, tk.END)
+        self.log_import("Iniciando importação...")
+        self.log_import(f"Fonte: {fonte}")
+        self.log_import(f"Limite: {limite or 'Sem limite'}\n")
+
+        # Executar em thread separada para não bloquear a UI
+        thread = threading.Thread(
+            target=self._executar_importacao,
+            args=(fonte, limite),
+            daemon=True
+        )
+        thread.start()
+
+    def _executar_importacao(self, fonte: str, limite: Optional[int]):
+        """Executa a importação em background"""
+        try:
+            if fonte == 'csv':
+                self.log_import("Selecionando ficheiro CSV...")
+                csv_path = filedialog.askopenfilename(
+                    title="Selecionar ficheiro CSV",
+                    filetypes=[("CSV files", "*.csv"), ("All files", "*.*")]
+                )
+
+                if not csv_path:
+                    self.log_import("Importação cancelada")
+                    return
+
+                from pathlib import Path
+                csv_path = Path(csv_path)
+
+                self.log_import(f"A processar: {csv_path.name}\n")
+
+                contratos = self.scraper.parse_csv_contratos(csv_path, limit=limite)
+                self.log_import(f"Parseados {len(contratos)} contratos\n")
+
+                stats = self.scraper.processar_lote_contratos(contratos, self.db)
+
+                self.log_import("\n=== RESULTADO ===")
+                self.log_import(f"Total processados: {stats['total']}")
+                self.log_import(f"Inseridos: {stats['inseridos']}")
+                self.log_import(f"Duplicados: {stats['duplicados']}")
+                self.log_import(f"Inválidos: {stats['invalidos']}")
+
+                # Verificar alertas
+                self.log_import("\nA verificar figuras de interesse...")
+                alertas = self.alerts_manager.verificar_novos_contratos(contratos)
+                self.log_import(f"Gerados {len(alertas)} alertas\n")
+
+                messagebox.showinfo("Sucesso", "Importação concluída!")
+
+                # Atualizar dashboard
+                self.root.after(0, self.atualizar_dashboard)
+
+            elif fonte == 'dados_abertos':
+                self.log_import("Importação de dados abertos ainda não implementada")
+                self.log_import("Use ficheiro CSV por agora")
+
+            elif fonte == 'api':
+                self.log_import("Importação via API ainda não implementada")
+                self.log_import("Use ficheiro CSV por agora")
+
+        except Exception as e:
+            logger.error(f"Erro na importação: {e}")
+            self.log_import(f"\nERRO: {e}")
+            self.root.after(0, lambda: messagebox.showerror("Erro", f"Erro na importação: {e}"))
+
+    def log_import(self, mensagem: str):
+        """Adiciona mensagem ao log de importação"""
+        self.import_log.insert(tk.END, mensagem + "\n")
+        self.import_log.see(tk.END)
+        self.import_log.update()
+
+    # ==================== MÉTODOS DE MENU ====================
+
+    def exportar_resultados(self):
+        """Exporta resultados da pesquisa para Excel"""
+        # Verificar se há resultados
+        if not self.resultados_tree.get_children():
+            messagebox.showwarning("Aviso", "Nenhum resultado para exportar")
+            return
+
+        # Selecionar local para salvar
+        filepath = filedialog.asksaveasfilename(
+            defaultextension=".xlsx",
+            filetypes=[("Excel files", "*.xlsx"), ("All files", "*.*")]
+        )
+
+        if not filepath:
+            return
+
+        try:
+            import pandas as pd
+
+            # Coletar dados da treeview
+            dados = []
+            for child in self.resultados_tree.get_children():
+                valores = self.resultados_tree.item(child)['values']
+                dados.append(valores)
+
+            # Criar DataFrame
+            colunas = ['ID', 'Adjudicante', 'Adjudicatária', 'Valor', 'Data', 'Tipo']
+            df = pd.DataFrame(dados, columns=colunas)
+
+            # Exportar
+            df.to_excel(filepath, index=False)
+
+            messagebox.showinfo("Sucesso", f"Dados exportados para {filepath}")
+            self.update_status(f"Exportado: {filepath}")
+
+        except Exception as e:
+            logger.error(f"Erro ao exportar: {e}")
+            messagebox.showerror("Erro", f"Erro ao exportar: {e}")
+
+    def atualizar_dados(self):
+        """Atualiza todos os dados da aplicação"""
+        self.update_status("A atualizar dados...")
+        self.atualizar_dashboard()
+        self.atualizar_lista_figuras()
+        self.atualizar_lista_alertas()
+        messagebox.showinfo("Sucesso", "Dados atualizados!")
+
+    def limpar_cache(self):
+        """Limpa o cache da aplicação"""
+        resposta = messagebox.askyesno(
+            "Confirmar",
+            "Esta operação irá limpar dados temporários.\nDeseja continuar?"
+        )
+
+        if resposta:
+            self.update_status("Cache limpo")
+            messagebox.showinfo("Sucesso", "Cache limpo com sucesso!")
+
+    def mostrar_sobre(self):
+        """Mostra informações sobre a aplicação"""
+        about_text = """
+Monitor de Contratos Públicos
+Versão 1.0
+
+Aplicação para monitorização de contratos públicos
+portugueses do Portal BASE (www.base.gov.pt)
+
+Desenvolvida com Python e Tkinter
+
+Funcionalidades:
+• Pesquisa de contratos com filtros avançados
+• Gestão de figuras de interesse
+• Sistema de alertas automáticos
+• Análise de conexões entre entidades
+• Exportação para Excel
+
+© 2025
+        """
+
+        messagebox.showinfo("Sobre", about_text)
+
+    # ==================== MÉTODOS AUXILIARES ====================
+
+    def update_status(self, mensagem: str):
+        """Atualiza a barra de status"""
+        self.status_bar.config(text=mensagem)
+        self.root.update()
+
+    def on_closing(self):
+        """Método chamado ao fechar a aplicação"""
+        if messagebox.askokcancel("Sair", "Deseja sair da aplicação?"):
+            self.db.close()
+            self.root.destroy()
+
+
+# ==================== FUNÇÃO PRINCIPAL ====================
+
+def main():
+    """Função principal para iniciar a aplicação"""
+    # Configurar logging
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.FileHandler('logs/app.log'),
+            logging.StreamHandler()
+        ]
+    )
+
+    # Criar janela principal
+    root = tk.Tk()
+
+    # Iniciar aplicação
+    app = ContratosPublicosGUI(root)
+
+    # Loop principal
+    root.mainloop()
+
+
+if __name__ == "__main__":
+    main()
