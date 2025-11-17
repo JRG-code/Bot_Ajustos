@@ -165,6 +165,13 @@ class AssociationsManager:
         row = cursor.fetchone()
         return dict(row) if row else None
 
+    def obter_empresa(self, empresa_id: int) -> Optional[Dict[str, Any]]:
+        """Obtém uma empresa pelo ID"""
+        cursor = self.db.connection.cursor()
+        cursor.execute("SELECT * FROM empresas WHERE id = ?", (empresa_id,))
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
     def pesquisar_pessoa(self, nome: str) -> List[Dict[str, Any]]:
         """Pesquisa pessoas por nome (parcial)"""
         cursor = self.db.connection.cursor()

@@ -101,6 +101,7 @@ class ContratosPublicosGUI:
         self.create_sync_tab()
         self.create_suspicious_tab()
         self.create_associations_tab()
+        self.create_connections_tab()
 
         # Barra de status
         self.create_status_bar()
@@ -1153,6 +1154,89 @@ PROJEÇÕES:
 
         # Carregar associações iniciais
         self.atualizar_lista_associacoes()
+
+    def create_connections_tab(self):
+        """Cria aba de visualização de ligações (grafo de rede)"""
+        conn_frame = ttk.Frame(self.notebook)
+        self.notebook.add(conn_frame, text="Ver Ligações 🔗")
+
+        # Título
+        titulo = ttk.Label(
+            conn_frame,
+            text="Visualização de Ligações",
+            font=('Arial', 14, 'bold')
+        )
+        titulo.pack(pady=10)
+
+        # Frame de controlos
+        controls_frame = ttk.Frame(conn_frame)
+        controls_frame.pack(fill=tk.X, padx=20, pady=5)
+
+        ttk.Button(
+            controls_frame,
+            text="🔄 Atualizar Grafo",
+            command=self.atualizar_grafo_ligacoes
+        ).pack(side=tk.LEFT, padx=5)
+
+        ttk.Button(
+            controls_frame,
+            text="🔍 Zoom In",
+            command=self.zoom_in_grafo
+        ).pack(side=tk.LEFT, padx=5)
+
+        ttk.Button(
+            controls_frame,
+            text="🔍 Zoom Out",
+            command=self.zoom_out_grafo
+        ).pack(side=tk.LEFT, padx=5)
+
+        ttk.Button(
+            controls_frame,
+            text="↺ Reset Zoom",
+            command=self.reset_zoom_grafo
+        ).pack(side=tk.LEFT, padx=5)
+
+        # Legenda
+        legend_frame = ttk.LabelFrame(conn_frame, text="Legenda", padding=5)
+        legend_frame.pack(fill=tk.X, padx=20, pady=5)
+
+        ttk.Label(legend_frame, text="━", foreground="red", font=('Arial', 14, 'bold')).pack(side=tk.LEFT, padx=5)
+        ttk.Label(legend_frame, text="Contratos (Empresa ↔ Câmara Municipal)").pack(side=tk.LEFT, padx=5)
+        ttk.Label(legend_frame, text="  |  ").pack(side=tk.LEFT, padx=5)
+        ttk.Label(legend_frame, text="━", foreground="black", font=('Arial', 14, 'bold')).pack(side=tk.LEFT, padx=5)
+        ttk.Label(legend_frame, text="Associações (Pessoa ↔ Empresa)").pack(side=tk.LEFT, padx=5)
+
+        # Frame do canvas com scrollbars
+        canvas_frame = ttk.Frame(conn_frame)
+        canvas_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+
+        # Canvas para desenhar o grafo
+        self.connections_canvas = tk.Canvas(
+            canvas_frame,
+            bg='white',
+            width=800,
+            height=600
+        )
+
+        # Scrollbars
+        h_scrollbar = ttk.Scrollbar(canvas_frame, orient=tk.HORIZONTAL, command=self.connections_canvas.xview)
+        v_scrollbar = ttk.Scrollbar(canvas_frame, orient=tk.VERTICAL, command=self.connections_canvas.yview)
+
+        self.connections_canvas.configure(xscrollcommand=h_scrollbar.set, yscrollcommand=v_scrollbar.set)
+
+        # Grid layout
+        self.connections_canvas.grid(row=0, column=0, sticky='nsew')
+        h_scrollbar.grid(row=1, column=0, sticky='ew')
+        v_scrollbar.grid(row=0, column=1, sticky='ns')
+
+        canvas_frame.grid_rowconfigure(0, weight=1)
+        canvas_frame.grid_columnconfigure(0, weight=1)
+
+        # Variáveis para zoom
+        self.grafo_zoom = 1.0
+
+        # Carregar grafo inicial
+        self.atualizar_grafo_ligacoes()
 
     # ==================== MÉTODOS DE ANÁLISE ====================
 
@@ -2268,6 +2352,29 @@ TOP 5 PARCEIROS:
             messagebox.showerror("Erro", "Limite de tamanho inválido")
             return
 
+        # Se for Portal BASE, perguntar o ano ANTES de iniciar a thread
+        ano = None
+        if fonte == 'dados_abertos':
+            from tkinter import simpledialog
+            resposta = messagebox.askyesno(
+                "Filtrar por Ano",
+                "Deseja importar apenas um ano específico?\n\n"
+                "• SIM: Escolher um ano (mais rápido, ficheiro menor)\n"
+                "• NÃO: Importar TODOS os anos disponíveis\n"
+                "  (AVISO: Pode ser MUITO grande - centenas de MB e demorar minutos!)"
+            )
+
+            if resposta:  # User wants to select a year
+                ano = simpledialog.askinteger(
+                    "Ano dos Contratos",
+                    "Digite o ano (2012-2025):",
+                    minvalue=2012,
+                    maxvalue=2025,
+                    parent=self.root
+                )
+                if ano is None:  # User cancelled
+                    return
+
         self.import_log.delete(1.0, tk.END)
         self.log_import("Iniciando importação...")
         self.log_import(f"Fonte: {fonte}")
@@ -2277,12 +2384,12 @@ TOP 5 PARCEIROS:
         # Executar em thread separada para não bloquear a UI
         thread = threading.Thread(
             target=self._executar_importacao,
-            args=(fonte, limite, limite_tamanho_mb),
+            args=(fonte, limite, limite_tamanho_mb, ano),
             daemon=True
         )
         thread.start()
 
-    def _executar_importacao(self, fonte: str, limite: Optional[int], limite_tamanho_mb: Optional[int] = None):
+    def _executar_importacao(self, fonte: str, limite: Optional[int], limite_tamanho_mb: Optional[int] = None, ano: Optional[int] = None):
         """Executa a importação em background"""
         try:
             # Reset progress bar
@@ -2355,30 +2462,6 @@ TOP 5 PARCEIROS:
                 self.log_import("A descarregar contratos do Portal BASE (BASE.gov.pt)...")
                 self.log_import("AVISO: Downloads grandes podem demorar vários minutos!\n")
                 self.update_import_progress(0, "A descarregar do Portal BASE...")
-
-                # Perguntar o ano (opcional)
-                from tkinter import simpledialog
-                resposta = messagebox.askyesno(
-                    "Filtrar por Ano",
-                    "Deseja importar apenas um ano específico?\n\n"
-                    "• SIM: Escolher um ano (mais rápido, ficheiro menor)\n"
-                    "• NÃO: Importar TODOS os anos disponíveis\n"
-                    "  (AVISO: Pode ser MUITO grande - centenas de MB e demorar minutos!)"
-                )
-
-                ano = None
-                if resposta:  # User wants to select a year
-                    ano = simpledialog.askinteger(
-                        "Ano dos Contratos",
-                        "Digite o ano (2012-2025):",
-                        minvalue=2012,
-                        maxvalue=2025,
-                        parent=self.root
-                    )
-                    if ano is None:  # User cancelled
-                        self.log_import("Importação cancelada")
-                        self.update_import_progress(0, "Importação cancelada")
-                        return
 
                 ano_str = str(ano) if ano else "TODOS"
                 self.log_import(f"Ano selecionado: {ano_str}\n")
@@ -2559,6 +2642,185 @@ Funcionalidades:
         """
 
         messagebox.showinfo("Sobre", about_text)
+
+    # ==================== MÉTODOS DE GRAFO DE LIGAÇÕES ====================
+
+    def atualizar_grafo_ligacoes(self):
+        """Atualiza e desenha o grafo de ligações"""
+        self.update_status("A carregar ligações...")
+
+        try:
+            # Limpar canvas
+            self.connections_canvas.delete('all')
+
+            # Obter dados de ligações
+            # 1. Ligações de contratos (vermelho): empresa - câmara municipal
+            contratos = self.db.pesquisar_contratos({})
+
+            # 2. Associações pessoa-empresa (preto)
+            associacoes = self.associations_manager.listar_associacoes()
+
+            # Criar estrutura de nós e arestas
+            nodes = {}  # {nome: {x, y, tipo}}
+            edges_contratos = []  # [(empresa, camaras, count)]
+            edges_associacoes = []  # [(pessoa, empresa)]
+
+            # Processar contratos (agrupar por adjudicatária)
+            contratos_por_par = {}
+            for contrato in contratos[:500]:  # Limitar a 500 para performance
+                empresa = contrato.get('adjudicataria', '')
+                camara = contrato.get('adjudicante', '')
+
+                if empresa and camara:
+                    nodes[empresa] = {'tipo': 'empresa'}
+                    nodes[camara] = {'tipo': 'camara'}
+
+                    par = (empresa, camara)
+                    contratos_por_par[par] = contratos_por_par.get(par, 0) + 1
+
+            for (empresa, camara), count in contratos_por_par.items():
+                edges_contratos.append((empresa, camara, count))
+
+            # Processar associações
+            for assoc in associacoes:
+                pessoa_id = assoc.get('pessoa_id')
+                empresa_id = assoc.get('empresa_id')
+
+                if pessoa_id and empresa_id:
+                    pessoa = self.associations_manager.obter_pessoa(pessoa_id)
+                    empresa = self.associations_manager.obter_empresa(empresa_id)
+
+                    if pessoa and empresa:
+                        pessoa_nome = pessoa.get('nome', '')
+                        empresa_nome = empresa.get('nome', '')
+
+                        if pessoa_nome and empresa_nome:
+                            nodes[pessoa_nome] = {'tipo': 'pessoa'}
+                            nodes[empresa_nome] = {'tipo': 'empresa'}
+                            edges_associacoes.append((pessoa_nome, empresa_nome))
+
+            # Calcular layout do grafo (circular simples)
+            self.desenhar_grafo(nodes, edges_contratos, edges_associacoes)
+
+            self.update_status(f"Grafo carregado: {len(nodes)} nós, {len(edges_contratos)} contratos, {len(edges_associacoes)} associações")
+
+        except Exception as e:
+            logger.error(f"Erro ao atualizar grafo: {e}")
+            messagebox.showerror("Erro", f"Erro ao carregar grafo: {e}")
+
+    def desenhar_grafo(self, nodes, edges_contratos, edges_associacoes):
+        """Desenha o grafo no canvas"""
+        import math
+
+        if not nodes:
+            self.connections_canvas.create_text(
+                400, 300,
+                text="Nenhuma ligação para visualizar\nImporte dados primeiro",
+                font=('Arial', 12),
+                fill='gray'
+            )
+            return
+
+        # Tamanho do canvas expandido
+        canvas_width = max(1600, len(nodes) * 100)
+        canvas_height = max(1200, len(nodes) * 80)
+
+        # Configurar scrollregion
+        self.connections_canvas.configure(scrollregion=(0, 0, canvas_width, canvas_height))
+
+        # Layout circular
+        center_x = canvas_width / 2
+        center_y = canvas_height / 2
+        radius = min(canvas_width, canvas_height) * 0.35
+
+        node_positions = {}
+        node_list = list(nodes.keys())
+
+        for i, node_name in enumerate(node_list):
+            angle = (2 * math.pi * i) / len(node_list)
+            x = center_x + radius * math.cos(angle)
+            y = center_y + radius * math.sin(angle)
+            node_positions[node_name] = (x, y)
+
+        # Desenhar arestas de contratos (vermelho)
+        for empresa, camara, count in edges_contratos:
+            if empresa in node_positions and camara in node_positions:
+                x1, y1 = node_positions[empresa]
+                x2, y2 = node_positions[camara]
+
+                # Espessura baseada no número de contratos
+                width = min(1 + count / 5, 8)
+
+                self.connections_canvas.create_line(
+                    x1, y1, x2, y2,
+                    fill='red',
+                    width=width,
+                    tags='edge_contrato'
+                )
+
+        # Desenhar arestas de associações (preto)
+        for pessoa, empresa in edges_associacoes:
+            if pessoa in node_positions and empresa in node_positions:
+                x1, y1 = node_positions[pessoa]
+                x2, y2 = node_positions[empresa]
+
+                self.connections_canvas.create_line(
+                    x1, y1, x2, y2,
+                    fill='black',
+                    width=2,
+                    tags='edge_associacao'
+                )
+
+        # Desenhar nós
+        for node_name, (x, y) in node_positions.items():
+            node_tipo = nodes[node_name]['tipo']
+
+            # Cores por tipo
+            if node_tipo == 'pessoa':
+                color = '#3498db'  # Azul
+            elif node_tipo == 'empresa':
+                color = '#2ecc71'  # Verde
+            else:  # camara
+                color = '#e74c3c'  # Vermelho
+
+            # Círculo
+            radius_node = 15
+            self.connections_canvas.create_oval(
+                x - radius_node, y - radius_node,
+                x + radius_node, y + radius_node,
+                fill=color,
+                outline='black',
+                width=2,
+                tags='node'
+            )
+
+            # Texto (nome abreviado se muito longo)
+            display_name = node_name[:30] + '...' if len(node_name) > 30 else node_name
+            self.connections_canvas.create_text(
+                x, y - 25,
+                text=display_name,
+                font=('Arial', 8),
+                tags='node_label'
+            )
+
+    def zoom_in_grafo(self):
+        """Aumenta o zoom do grafo"""
+        self.grafo_zoom *= 1.2
+        self.aplicar_zoom_grafo()
+
+    def zoom_out_grafo(self):
+        """Diminui o zoom do grafo"""
+        self.grafo_zoom /= 1.2
+        self.aplicar_zoom_grafo()
+
+    def reset_zoom_grafo(self):
+        """Reseta o zoom do grafo"""
+        self.grafo_zoom = 1.0
+        self.aplicar_zoom_grafo()
+
+    def aplicar_zoom_grafo(self):
+        """Aplica o zoom atual ao canvas"""
+        self.connections_canvas.scale('all', 0, 0, self.grafo_zoom, self.grafo_zoom)
 
     # ==================== MÉTODOS AUXILIARES ====================
 
