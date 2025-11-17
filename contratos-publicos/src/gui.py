@@ -15,6 +15,9 @@ from database import DatabaseManager
 from scraper import ContratosPublicosScraper
 from entities import EntitiesManager
 from alerts import AlertsManager
+from sync import SyncManager
+from suspicious_patterns import SuspiciousPatternDetector, LimitesLegais, analisar_todos_contratos
+from associations import AssociationsManager
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +41,9 @@ class ContratosPublicosGUI:
         self.scraper = ContratosPublicosScraper()
         self.entities_manager = EntitiesManager(self.db)
         self.alerts_manager = AlertsManager(self.db)
+        self.sync_manager = SyncManager(self.db, self.scraper)
+        self.suspicious_detector = SuspiciousPatternDetector()
+        self.associations_manager = AssociationsManager(self.db)
 
         # Configurar estilo
         self.setup_styles()
@@ -87,6 +93,9 @@ class ContratosPublicosGUI:
         self.create_figures_tab()
         self.create_alerts_tab()
         self.create_import_tab()
+        self.create_sync_tab()
+        self.create_suspicious_tab()
+        self.create_associations_tab()
 
         # Barra de status
         self.create_status_bar()
@@ -108,6 +117,16 @@ class ContratosPublicosGUI:
         menubar.add_cascade(label="Ferramentas", menu=tools_menu)
         tools_menu.add_command(label="Atualizar Dados", command=self.atualizar_dados)
         tools_menu.add_command(label="Limpar Cache", command=self.limpar_cache)
+
+        
+        # Menu Análise Avançada
+        analise_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Análise Avançada", menu=analise_menu)
+        analise_menu.add_command(label="Analisar Padrões Suspeitos", command=self.analisar_padroes_suspeitos)
+        analise_menu.add_command(label="Detectar Conflitos de Interesse", command=self.detectar_conflitos_interesse)
+        analise_menu.add_command(label="Configurar Detecção", command=self.configurar_deteccao)
+        analise_menu.add_separator()
+        analise_menu.add_command(label="Relatório Completo", command=self.gerar_relatorio_completo)
 
         # Menu Ajuda
         help_menu = tk.Menu(menubar, tearoff=0)
@@ -494,6 +513,764 @@ class ContratosPublicosGUI:
 
         self.import_log = scrolledtext.ScrolledText(log_frame, height=10, wrap=tk.WORD)
         self.import_log.pack(fill=tk.BOTH, expand=True)
+
+
+    def create_sync_tab(self):
+        """Cria a aba de sincronização"""
+        sync_frame = ttk.Frame(self.notebook)
+        self.notebook.add(sync_frame, text="Sincronização")
+
+        # Título
+        titulo = ttk.Label(
+            sync_frame,
+            text="Sincronização Automática de Dados",
+            font=('Arial', 14, 'bold')
+        )
+        titulo.pack(pady=20)
+
+        # Frame de status
+        status_frame = ttk.LabelFrame(sync_frame, text="Estado da Sincronização", padding=20)
+        status_frame.pack(fill=tk.X, padx=40, pady=10)
+
+        self.sync_status_labels = {}
+
+        info_items = [
+            ('auto_sync', 'Sincronização Automática:', 0),
+            ('ultima_sync', 'Última Sincronização:', 1),
+            ('proxima_sync', 'Próxima Sincronização:', 2),
+            ('total_contratos', 'Total de Contratos:', 3),
+            ('contratos_24h', 'Novos (24h):', 4),
+        ]
+
+        for key, label, row in info_items:
+            ttk.Label(status_frame, text=label, font=('Arial', 10, 'bold')).grid(
+                row=row, column=0, sticky=tk.W, padx=5, pady=5
+            )
+            value_label = ttk.Label(status_frame, text="...", font=('Arial', 10))
+            value_label.grid(row=row, column=1, sticky=tk.W, padx=5, pady=5)
+            self.sync_status_labels[key] = value_label
+
+        # Frame de configuração
+        config_frame = ttk.LabelFrame(sync_frame, text="Configuração", padding=20)
+        config_frame.pack(fill=tk.X, padx=40, pady=10)
+
+        # Auto sync checkbox
+        self.auto_sync_var = tk.BooleanVar()
+        ttk.Checkbutton(
+            config_frame,
+            text="Ativar sincronização automática",
+            variable=self.auto_sync_var,
+            command=self.toggle_auto_sync
+        ).pack(anchor=tk.W, pady=5)
+
+        # Intervalo
+        interval_frame = ttk.Frame(config_frame)
+        interval_frame.pack(anchor=tk.W, pady=10)
+
+        ttk.Label(interval_frame, text="Intervalo:").pack(side=tk.LEFT, padx=5)
+        self.sync_interval_var = tk.IntVar(value=24)
+        ttk.Spinbox(
+            interval_frame,
+            from_=1,
+            to=168,
+            textvariable=self.sync_interval_var,
+            width=10
+        ).pack(side=tk.LEFT, padx=5)
+        ttk.Label(interval_frame, text="horas").pack(side=tk.LEFT, padx=5)
+
+        ttk.Button(
+            config_frame,
+            text="Guardar Configuração",
+            command=self.save_sync_config
+        ).pack(anchor=tk.W, pady=10)
+
+        # Frame de ações
+        action_frame = ttk.LabelFrame(sync_frame, text="Ações", padding=20)
+        action_frame.pack(fill=tk.X, padx=40, pady=10)
+
+        ttk.Button(
+            action_frame,
+            text="Sincronizar Agora",
+            command=self.sync_now
+        ).pack(side=tk.LEFT, padx=5, pady=5)
+
+        ttk.Button(
+            action_frame,
+            text="Otimizar Base de Dados",
+            command=self.optimize_database
+        ).pack(side=tk.LEFT, padx=5, pady=5)
+
+        ttk.Button(
+            action_frame,
+            text="Ver Estimativas de Tamanho",
+            command=self.show_size_estimates
+        ).pack(side=tk.LEFT, padx=5, pady=5)
+
+        ttk.Button(
+            action_frame,
+            text="Atualizar Estado",
+            command=self.update_sync_status
+        ).pack(side=tk.LEFT, padx=5, pady=5)
+
+        # Carregar estado inicial
+        self.update_sync_status()
+
+    def update_sync_status(self):
+        """Atualiza informações de estado da sincronização"""
+        try:
+            status = self.sync_manager.get_sync_status()
+
+            self.sync_status_labels['auto_sync'].config(
+                text="Ativo" if status['auto_sync_ativo'] else "Inativo"
+            )
+
+            ultima = status['ultima_sincronizacao']
+            self.sync_status_labels['ultima_sync'].config(
+                text=ultima[:19] if ultima else "Nunca"
+            )
+
+            proxima = status['proxima_sincronizacao']
+            self.sync_status_labels['proxima_sync'].config(
+                text=proxima[:19] if proxima else "N/A"
+            )
+
+            self.sync_status_labels['total_contratos'].config(
+                text=f"{status['total_contratos_bd']:,}"
+            )
+
+            self.sync_status_labels['contratos_24h'].config(
+                text=f"{status['contratos_ultimas_24h']:,}"
+            )
+
+            # Atualizar variáveis
+            config = self.sync_manager.config
+            self.auto_sync_var.set(config.get('auto_sync', False))
+            self.sync_interval_var.set(config.get('sync_interval_hours', 24))
+
+        except Exception as e:
+            logger.error(f"Erro ao atualizar status de sync: {e}")
+
+    def toggle_auto_sync(self):
+        """Ativa/desativa sincronização automática"""
+        auto_sync = self.auto_sync_var.get()
+        self.sync_manager.configure_sync(
+            auto_sync=auto_sync,
+            interval_hours=self.sync_interval_var.get()
+        )
+        self.update_sync_status()
+        messagebox.showinfo(
+            "Sincronização",
+            f"Sincronização automática {'ativada' if auto_sync else 'desativada'}"
+        )
+
+    def save_sync_config(self):
+        """Guarda configuração de sincronização"""
+        try:
+            self.sync_manager.configure_sync(
+                auto_sync=self.auto_sync_var.get(),
+                interval_hours=self.sync_interval_var.get(),
+                incremental=True
+            )
+            messagebox.showinfo("Sucesso", "Configuração guardada!")
+            self.update_sync_status()
+        except Exception as e:
+            messagebox.showerror("Erro", f"Erro ao guardar configuração: {e}")
+
+    def sync_now(self):
+        """Executa sincronização agora"""
+        resposta = messagebox.askyesno(
+            "Sincronizar",
+            "Executar sincronização agora?\n\n"
+            "Isto pode demorar alguns minutos se houver muitos dados novos."
+        )
+
+        if not resposta:
+            return
+
+        try:
+            self.update_status("A sincronizar...")
+
+            # Executar em thread para não bloquear UI
+            import threading
+
+            def sync_thread():
+                stats = self.sync_manager.sync_now()
+
+                # Atualizar UI na thread principal
+                self.root.after(0, lambda: self._sync_completed(stats))
+
+            thread = threading.Thread(target=sync_thread, daemon=True)
+            thread.start()
+
+        except Exception as e:
+            logger.error(f"Erro na sincronização: {e}")
+            messagebox.showerror("Erro", f"Erro na sincronização: {e}")
+
+    def _sync_completed(self, stats):
+        """Callback quando sincronização completa"""
+        if stats.get('sucesso'):
+            messagebox.showinfo(
+                "Sincronização Completa",
+                f"Contratos novos: {stats.get('contratos_novos', 0)}\n"
+                f"Alertas gerados: {stats.get('alertas_gerados', 0)}"
+            )
+            self.update_sync_status()
+            self.atualizar_dashboard()
+        else:
+            erros = "\n".join(stats.get('erros', []))
+            messagebox.showerror("Erro", f"Sincronização falhou:\n{erros}")
+
+        self.update_status("Pronto")
+
+    def optimize_database(self):
+        """Otimiza a base de dados"""
+        resposta = messagebox.askyesno(
+            "Otimizar",
+            "Otimizar base de dados?\n\n"
+            "Isto irá:\n"
+            "• Compactar dados (VACUUM)\n"
+            "• Atualizar estatísticas\n"
+            "• Reindexar tabelas\n\n"
+            "Pode demorar alguns minutos com bases de dados grandes."
+        )
+
+        if not resposta:
+            return
+
+        try:
+            self.update_status("A otimizar base de dados...")
+
+            import threading
+
+            def optimize_thread():
+                stats = self.sync_manager.optimize_database()
+                self.root.after(0, lambda: self._optimize_completed(stats))
+
+            thread = threading.Thread(target=optimize_thread, daemon=True)
+            thread.start()
+
+        except Exception as e:
+            logger.error(f"Erro na otimização: {e}")
+            messagebox.showerror("Erro", f"Erro na otimização: {e}")
+
+    def _optimize_completed(self, stats):
+        """Callback quando otimização completa"""
+        reducao = self.sync_manager._format_bytes(stats['reducao_bytes'])
+        percentagem = stats['reducao_percentagem']
+
+        messagebox.showinfo(
+            "Otimização Completa",
+            f"Base de dados otimizada!\n\n"
+            f"Espaço recuperado: {reducao}\n"
+            f"Redução: {percentagem:.1f}%"
+        )
+
+        self.update_status("Pronto")
+
+    def show_size_estimates(self):
+        """Mostra estimativas de tamanho"""
+        try:
+            stats = self.db.obter_estatisticas()
+            total_contratos = stats['total_contratos']
+
+            # Estimativas para diferentes cenários
+            estimativas = self.sync_manager.estimate_database_size(total_contratos)
+
+            texto = f"""
+╔════════════════════════════════════════════════════════════════╗
+║     ESTIMATIVAS DE TAMANHO DA BASE DE DADOS                    ║
+╚════════════════════════════════════════════════════════════════╝
+
+ATUAL ({total_contratos:,} contratos):
+  • Sem otimizar: {estimativas['tamanho_sem_otimizar_formatado']}
+  • Otimizado: {estimativas['tamanho_otimizado_formatado']}
+  • Bytes por contrato: ~{estimativas['bytes_por_contrato']} bytes
+
+PROJEÇÕES:
+  • 10 mil contratos: {estimativas['estimativas_cenarios']['10_mil_contratos']}
+  • 100 mil contratos: {estimativas['estimativas_cenarios']['100_mil_contratos']}
+  • 500 mil contratos: {estimativas['estimativas_cenarios']['500_mil_contratos']}
+  • 1 milhão contratos: {estimativas['estimativas_cenarios']['1_milhao_contratos']}
+
+💡 DICAS:
+  • Execute "Otimizar BD" regularmente (reduz ~30%)
+  • Exporte e remova contratos muito antigos
+  • Mantenha apenas dados relevantes
+
+═══════════════════════════════════════════════════════════════════
+            """
+
+            # Mostrar em janela
+            window = tk.Toplevel(self.root)
+            window.title("Estimativas de Tamanho")
+            window.geometry("700x500")
+
+            text_widget = scrolledtext.ScrolledText(window, wrap=tk.WORD, font=('Courier', 10))
+            text_widget.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+            text_widget.insert(tk.END, texto)
+            text_widget.config(state=tk.DISABLED)
+
+            ttk.Button(window, text="Fechar", command=window.destroy).pack(pady=10)
+
+        except Exception as e:
+            logger.error(f"Erro ao calcular estimativas: {e}")
+            messagebox.showerror("Erro", f"Erro: {e}")
+
+
+
+    def create_suspicious_tab(self):
+        """Cria aba de análise de padrões suspeitos"""
+        susp_frame = ttk.Frame(self.notebook)
+        self.notebook.add(susp_frame, text="Padrões Suspeitos 🔍")
+
+        # Título
+        titulo = ttk.Label(
+            susp_frame,
+            text="Análise de Padrões Suspeitos",
+            font=('Arial', 14, 'bold')
+        )
+        titulo.pack(pady=10)
+
+        # Botões de análise
+        btn_frame = ttk.Frame(susp_frame)
+        btn_frame.pack(fill=tk.X, padx=20, pady=10)
+
+        ttk.Button(
+            btn_frame,
+            text="Analisar Todos os Contratos",
+            command=self.analisar_todos_contratos_suspeitos
+        ).pack(side=tk.LEFT, padx=5)
+
+        ttk.Button(
+            btn_frame,
+            text="Configurar Detecção",
+            command=self.configurar_deteccao
+        ).pack(side=tk.LEFT, padx=5)
+
+        ttk.Button(
+            btn_frame,
+            text="Exportar Relatório",
+            command=self.exportar_relatorio_suspeitos
+        ).pack(side=tk.LEFT, padx=5)
+
+        # Frame de resultados
+        resultados_frame = ttk.LabelFrame(susp_frame, text="Padrões Detectados", padding=10)
+        resultados_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+
+        # Treeview
+        columns = ('Tipo', 'Gravidade', 'Descrição', 'Valor')
+        self.suspicious_tree = ttk.Treeview(
+            resultados_frame,
+            columns=columns,
+            show='headings',
+            height=15
+        )
+
+        for col in columns:
+            self.suspicious_tree.heading(col, text=col)
+
+        self.suspicious_tree.column('Tipo', width=150)
+        self.suspicious_tree.column('Gravidade', width=100)
+        self.suspicious_tree.column('Descrição', width=400)
+        self.suspicious_tree.column('Valor', width=120)
+
+        self.suspicious_tree.pack(fill=tk.BOTH, expand=True, side=tk.LEFT)
+
+        # Scrollbar
+        scrollbar = ttk.Scrollbar(resultados_frame, orient=tk.VERTICAL,
+                                 command=self.suspicious_tree.yview)
+        self.suspicious_tree.configure(yscroll=scrollbar.set)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        # Cores por gravidade
+        self.suspicious_tree.tag_configure('critica', background='#ffcccc')
+        self.suspicious_tree.tag_configure('alta', background='#ffe6cc')
+        self.suspicious_tree.tag_configure('media', background='#fff9cc')
+        self.suspicious_tree.tag_configure('baixa', background='#ffffff')
+
+    def create_associations_tab(self):
+        """Cria aba de associações pessoa-empresa"""
+        assoc_frame = ttk.Frame(self.notebook)
+        self.notebook.add(assoc_frame, text="Associações 👥")
+
+        # Título
+        titulo = ttk.Label(
+            assoc_frame,
+            text="Associações Pessoa-Empresa",
+            font=('Arial', 14, 'bold')
+        )
+        titulo.pack(pady=10)
+
+        # Frame de pesquisa
+        search_frame = ttk.LabelFrame(assoc_frame, text="Pesquisar", padding=10)
+        search_frame.pack(fill=tk.X, padx=20, pady=10)
+
+        ttk.Label(search_frame, text="Nome (pessoa ou empresa):").pack(side=tk.LEFT, padx=5)
+        self.assoc_search_entry = ttk.Entry(search_frame, width=40)
+        self.assoc_search_entry.pack(side=tk.LEFT, padx=5)
+
+        ttk.Button(
+            search_frame,
+            text="Pesquisar Contratos",
+            command=self.pesquisar_por_associacao
+        ).pack(side=tk.LEFT, padx=5)
+
+        ttk.Button(
+            search_frame,
+            text="Adicionar Associação",
+            command=self.adicionar_associacao_dialog
+        ).pack(side=tk.LEFT, padx=5)
+
+        # Frame de resultados
+        results_frame = ttk.LabelFrame(assoc_frame, text="Resultados", padding=10)
+        results_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+
+        # Texto de resultados
+        self.assoc_results_text = scrolledtext.ScrolledText(
+            results_frame,
+            height=20,
+            wrap=tk.WORD
+        )
+        self.assoc_results_text.pack(fill=tk.BOTH, expand=True)
+
+    # ==================== MÉTODOS DE ANÁLISE ====================
+
+    def analisar_todos_contratos_suspeitos(self):
+        """Analisa todos os contratos para padrões suspeitos"""
+        self.update_status("A analisar padrões suspeitos...")
+
+        try:
+            # Obter todos os contratos
+            contratos = self.db.pesquisar_contratos({})
+
+            if not contratos:
+                messagebox.showinfo("Info", "Nenhum contrato na base de dados")
+                return
+
+            # Analisar
+            padroes = self.suspicious_detector.analisar_contratos(contratos)
+
+            # Limpar resultados anteriores
+            self.suspicious_tree.delete(*self.suspicious_tree.get_children())
+
+            # Inserir novos resultados
+            for padrao in padroes:
+                gravidade = padrao.get('gravidade', 'baixa')
+                valor = padrao.get('valor', '')
+                valor_str = f"€{valor:,.2f}" if valor else ""
+
+                self.suspicious_tree.insert('', 'end', values=(
+                    padrao['tipo'],
+                    gravidade.upper(),
+                    padrao['descricao'],
+                    valor_str
+                ), tags=(gravidade,))
+
+            messagebox.showinfo(
+                "Análise Completa",
+                f"Detectados {len(padroes)} padrões suspeitos\n\n"
+                f"🔴 Alta: {sum(1 for p in padroes if p.get('gravidade') == 'alta')}\n"
+                f"🟡 Média: {sum(1 for p in padroes if p.get('gravidade') == 'media')}\n"
+                f"⚪ Baixa: {sum(1 for p in padroes if p.get('gravidade') == 'baixa')}"
+            )
+
+            self.update_status("Análise concluída")
+
+        except Exception as e:
+            logger.error(f"Erro na análise: {e}")
+            messagebox.showerror("Erro", f"Erro: {e}")
+
+    def configurar_deteccao(self):
+        """Abre diálogo de configuração de detecção"""
+        config_window = tk.Toplevel(self.root)
+        config_window.title("Configurar Detecção de Padrões Suspeitos")
+        config_window.geometry("600x500")
+
+        # Título
+        ttk.Label(
+            config_window,
+            text="Configurações de Detecção",
+            font=('Arial', 14, 'bold')
+        ).pack(pady=10)
+
+        # Frame de configurações
+        config_frame = ttk.LabelFrame(config_window, text="Parâmetros", padding=20)
+        config_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+
+        config = self.suspicious_detector.config
+
+        # Variáveis
+        vars_dict = {}
+
+        # Valores suspeitos
+        vars_dict['detectar_valores_suspeitos'] = tk.BooleanVar(
+            value=config['detectar_valores_suspeitos']
+        )
+        ttk.Checkbutton(
+            config_frame,
+            text="Detectar valores suspeitos (próximos dos limites legais)",
+            variable=vars_dict['detectar_valores_suspeitos']
+        ).pack(anchor=tk.W, pady=5)
+
+        # Fracionamento
+        vars_dict['detectar_fracionamento'] = tk.BooleanVar(
+            value=config['detectar_fracionamento']
+        )
+        ttk.Checkbutton(
+            config_frame,
+            text="Detectar fracionamento ilegal de contratos",
+            variable=vars_dict['detectar_fracionamento']
+        ).pack(anchor=tk.W, pady=5)
+
+        # Contratos repetidos
+        vars_dict['detectar_contratos_repetidos'] = tk.BooleanVar(
+            value=config['detectar_contratos_repetidos']
+        )
+        ttk.Checkbutton(
+            config_frame,
+            text="Detectar contratos excessivamente repetidos",
+            variable=vars_dict['detectar_contratos_repetidos']
+        ).pack(anchor=tk.W, pady=5)
+
+        # Procedimentos inadequados
+        vars_dict['detectar_procedimento_inadequado'] = tk.BooleanVar(
+            value=config['detectar_procedimento_inadequado']
+        )
+        ttk.Checkbutton(
+            config_frame,
+            text="Detectar procedimentos inadequados para o valor",
+            variable=vars_dict['detectar_procedimento_inadequado']
+        ).pack(anchor=tk.W, pady=5)
+
+        # Valores redondos suspeitos
+        vars_dict['detectar_valores_redondos'] = tk.BooleanVar(
+            value=config['detectar_valores_redondos']
+        )
+        ttk.Checkbutton(
+            config_frame,
+            text="Detectar valores 'calculados' (ex: €74.999)",
+            variable=vars_dict['detectar_valores_redondos']
+        ).pack(anchor=tk.W, pady=5)
+
+        # Limites legais
+        ttk.Label(
+            config_frame,
+            text="\n📋 Limites Legais em Portugal:",
+            font=('Arial', 10, 'bold')
+        ).pack(anchor=tk.W, pady=10)
+
+        limits_text = f"""
+• Ajuste Direto (Bens/Serviços): até €{LimitesLegais.AJUSTE_DIRETO_BENS_SERVICOS:,.0f}
+• Ajuste Direto (Obras): até €{LimitesLegais.AJUSTE_DIRETO_OBRAS:,.0f}
+• Consulta Prévia (Bens/Serviços): €{LimitesLegais.AJUSTE_DIRETO_BENS_SERVICOS:,.0f} - €{LimitesLegais.CONSULTA_PREVIA_BENS_SERVICOS:,.0f}
+• Concurso Público: acima de €{LimitesLegais.CONCURSO_PUBLICO_BENS_SERVICOS:,.0f}
+        """
+
+        ttk.Label(config_frame, text=limits_text).pack(anchor=tk.W, padx=20)
+
+        # Botões
+        btn_frame = ttk.Frame(config_window)
+        btn_frame.pack(fill=tk.X, padx=20, pady=10)
+
+        def guardar_config():
+            for key, var in vars_dict.items():
+                self.suspicious_detector.config[key] = var.get()
+            messagebox.showinfo("Sucesso", "Configuração guardada!")
+            config_window.destroy()
+
+        ttk.Button(btn_frame, text="Guardar", command=guardar_config).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="Cancelar", command=config_window.destroy).pack(side=tk.LEFT, padx=5)
+
+    def exportar_relatorio_suspeitos(self):
+        """Exporta relatório de padrões suspeitos"""
+        if not self.suspicious_tree.get_children():
+            messagebox.showwarning("Aviso", "Nenhum padrão detectado para exportar")
+            return
+
+        filepath = filedialog.asksaveasfilename(
+            defaultextension=".txt",
+            filetypes=[("Text files", "*.txt"), ("All files", "*.*")]
+        )
+
+        if not filepath:
+            return
+
+        try:
+            # Gerar relatório
+            with open(filepath, 'w', encoding='utf-8') as f:
+                f.write("RELATÓRIO DE PADRÕES SUSPEITOS\n")
+                f.write("=" * 70 + "\n\n")
+
+                for item in self.suspicious_tree.get_children():
+                    valores = self.suspicious_tree.item(item)['values']
+                    f.write(f"Tipo: {valores[0]}\n")
+                    f.write(f"Gravidade: {valores[1]}\n")
+                    f.write(f"Descrição: {valores[2]}\n")
+                    if valores[3]:
+                        f.write(f"Valor: {valores[3]}\n")
+                    f.write("\n" + "-" * 70 + "\n\n")
+
+            messagebox.showinfo("Sucesso", f"Relatório exportado: {filepath}")
+
+        except Exception as e:
+            messagebox.showerror("Erro", f"Erro ao exportar: {e}")
+
+    def pesquisar_por_associacao(self):
+        """Pesquisa contratos por pessoa/empresa usando associações"""
+        nome = self.assoc_search_entry.get().strip()
+
+        if not nome:
+            messagebox.showwarning("Aviso", "Digite um nome para pesquisar")
+            return
+
+        try:
+            # Pesquisar por pessoa
+            resultado = self.associations_manager.pesquisar_contratos_por_pessoa(nome)
+
+            # Limpar resultados anteriores
+            self.assoc_results_text.delete(1.0, tk.END)
+
+            # Mostrar resultados
+            texto = f"""
+╔════════════════════════════════════════════════════════════════╗
+║     PESQUISA POR ASSOCIAÇÕES: {nome.upper():<40}║
+╚════════════════════════════════════════════════════════════════╝
+
+Total de Contratos Encontrados: {resultado['total_contratos']}
+Valor Total: €{resultado['valor_total']:,.2f}
+
+EMPRESAS ASSOCIADAS ({len(resultado['empresas_associadas'])}):
+"""
+            for empresa in resultado['empresas_associadas']:
+                texto += f"  • {empresa}\n"
+
+            texto += f"\nCONTRATOS DIRETOS ({len(resultado['contratos_diretos'])}):  \n"
+            for c in resultado['contratos_diretos'][:10]:
+                texto += f"  • {c.get('adjudicante', 'N/D')} → {c.get('adjudicataria', 'N/D')} (€{c.get('valor', 0):,.2f})\n"
+
+            texto += f"\nCONTRATOS DE EMPRESAS ASSOCIADAS ({len(resultado['contratos_empresas'])}):\n"
+            for c in resultado['contratos_empresas'][:10]:
+                texto += f"  • {c.get('_empresa_associada', 'N/D')} ({c.get('_tipo_associacao', '')}): €{c.get('valor', 0):,.2f}\n"
+
+            self.assoc_results_text.insert(tk.END, texto)
+
+        except Exception as e:
+            logger.error(f"Erro na pesquisa: {e}")
+            messagebox.showerror("Erro", f"Erro: {e}")
+
+    def adicionar_associacao_dialog(self):
+        """Diálogo para adicionar associação pessoa-empresa"""
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Adicionar Associação")
+        dialog.geometry("500x400")
+
+        ttk.Label(dialog, text="Nome da Pessoa:").grid(row=0, column=0, padx=5, pady=5, sticky=tk.W)
+        nome_entry = ttk.Entry(dialog, width=40)
+        nome_entry.grid(row=0, column=1, padx=5, pady=5)
+
+        ttk.Label(dialog, text="Cargo Político:").grid(row=1, column=0, padx=5, pady=5, sticky=tk.W)
+        cargo_entry = ttk.Entry(dialog, width=40)
+        cargo_entry.grid(row=1, column=1, padx=5, pady=5)
+
+        ttk.Label(dialog, text="Empresa:").grid(row=2, column=0, padx=5, pady=5, sticky=tk.W)
+        empresa_entry = ttk.Entry(dialog, width=40)
+        empresa_entry.grid(row=2, column=1, padx=5, pady=5)
+
+        ttk.Label(dialog, text="Tipo Relação:").grid(row=3, column=0, padx=5, pady=5, sticky=tk.W)
+        tipo_combo = ttk.Combobox(dialog, width=37)
+        tipo_combo['values'] = ['dono', 'socio', 'gerente', 'administrador', 'familiar', 'outro']
+        tipo_combo.set('socio')
+        tipo_combo.grid(row=3, column=1, padx=5, pady=5)
+
+        ttk.Label(dialog, text="Fonte:").grid(row=4, column=0, padx=5, pady=5, sticky=tk.W)
+        fonte_entry = ttk.Entry(dialog, width=40)
+        fonte_entry.grid(row=4, column=1, padx=5, pady=5)
+
+        def guardar():
+            try:
+                # Adicionar pessoa
+                pessoa_id = self.associations_manager.adicionar_pessoa(
+                    nome=nome_entry.get(),
+                    cargo_politico=cargo_entry.get()
+                )
+
+                # Adicionar associação
+                self.associations_manager.associar_pessoa_empresa(
+                    pessoa_id=pessoa_id,
+                    empresa_nome=empresa_entry.get(),
+                    tipo_relacao=tipo_combo.get(),
+                    fonte=fonte_entry.get()
+                )
+
+                messagebox.showinfo("Sucesso", "Associação adicionada!")
+                dialog.destroy()
+
+            except Exception as e:
+                messagebox.showerror("Erro", f"Erro: {e}")
+
+        ttk.Button(dialog, text="Guardar", command=guardar).grid(row=5, column=0, columnspan=2, pady=20)
+
+    def detectar_conflitos_interesse(self):
+        """Detecta conflitos de interesse"""
+        self.update_status("A detectar conflitos de interesse...")
+
+        try:
+            conflitos = self.associations_manager.detectar_conflitos_interesse()
+
+            if not conflitos:
+                messagebox.showinfo("Info", "Nenhum conflito de interesse detectado")
+                return
+
+            # Mostrar em janela
+            window = tk.Toplevel(self.root)
+            window.title(f"Conflitos de Interesse Detectados ({len(conflitos)})")
+            window.geometry("800x600")
+
+            text_widget = scrolledtext.ScrolledText(window, wrap=tk.WORD)
+            text_widget.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+            texto = f"""
+╔════════════════════════════════════════════════════════════════╗
+║     CONFLITOS DE INTERESSE DETECTADOS                          ║
+╚════════════════════════════════════════════════════════════════╝
+
+Total: {len(conflitos)}
+
+"""
+            for i, c in enumerate(conflitos, 1):
+                gravidade_emoji = {
+                    'critica': '🔴',
+                    'alta': '🟠',
+                    'media': '🟡',
+                    'baixa': '⚪'
+                }.get(c['gravidade'], '⚪')
+
+                texto += f"{i}. {gravidade_emoji} {c['gravidade'].upper()}\n"
+                texto += f"   Pessoa: {c['pessoa_nome']} ({c['cargo']})\n"
+                texto += f"   Empresa: {c['empresa']}\n"
+                texto += f"   Contrato: {c['adjudicante']} (€{c['valor']:,.2f})\n"
+                texto += f"   {c['descricao']}\n\n"
+
+            text_widget.insert(tk.END, texto)
+            text_widget.config(state=tk.DISABLED)
+
+            self.update_status("Conflitos detectados")
+
+        except Exception as e:
+            logger.error(f"Erro: {e}")
+            messagebox.showerror("Erro", f"Erro: {e}")
+
+    def gerar_relatorio_completo(self):
+        """Gera relatório completo de análise"""
+        messagebox.showinfo(
+            "Relatório Completo",
+            "Funcionalidade em desenvolvimento!\n\n"
+            "Irá incluir:\n"
+            "• Padrões suspeitos\n"
+            "• Conflitos de interesse\n"
+            "• Estatísticas avançadas\n"
+            "• Exportação em PDF"
+        )
 
     def create_status_bar(self):
         """Cria a barra de status na parte inferior"""

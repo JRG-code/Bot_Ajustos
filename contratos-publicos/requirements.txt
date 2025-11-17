@@ -22,3 +22,7 @@ tqdm>=4.66.0
 
 # Logging
 coloredlogs>=15.0
+
+# Build de executável (opcional - apenas para criar .exe/.app)
+pyinstaller>=6.0.0
+Pillow>=10.0.0  # Para criar ícone
