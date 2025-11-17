@@ -258,6 +258,10 @@ class DatabaseManager:
             query += " AND tipo_contrato = ?"
             params.append(filtros['tipo_contrato'])
 
+        if filtros.get('tipo_procedimento'):
+            query += " AND tipo_procedimento = ?"
+            params.append(filtros['tipo_procedimento'])
+
         query += " ORDER BY data_contrato DESC"
 
         cursor.execute(query, params)
