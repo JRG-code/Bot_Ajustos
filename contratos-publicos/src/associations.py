@@ -533,3 +533,59 @@ class AssociationsManager:
 
         logger.info(f"Importadas {count} associações")
         return count
+
+    # ==================== MÉTODOS AUXILIARES ====================
+
+    def listar_associacoes(self) -> List[Dict[str, Any]]:
+        """
+        Lista todas as associações pessoa-empresa
+
+        Returns:
+            Lista de associações
+        """
+        cursor = self.db.connection.cursor()
+
+        cursor.execute("""
+            SELECT * FROM associacoes_pessoa_empresa
+            ORDER BY data_adicao DESC
+        """)
+
+        return [dict(row) for row in cursor.fetchall()]
+
+    def obter_pessoa(self, pessoa_id: int) -> Optional[Dict[str, Any]]:
+        """
+        Obtém dados de uma pessoa pelo ID
+
+        Args:
+            pessoa_id: ID da pessoa
+
+        Returns:
+            Dicionário com dados da pessoa ou None
+        """
+        cursor = self.db.connection.cursor()
+
+        cursor.execute("""
+            SELECT * FROM pessoas WHERE id = ?
+        """, (pessoa_id,))
+
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+    def obter_associacao(self, associacao_id: int) -> Optional[Dict[str, Any]]:
+        """
+        Obtém dados de uma associação pelo ID
+
+        Args:
+            associacao_id: ID da associação
+
+        Returns:
+            Dicionário com dados da associação ou None
+        """
+        cursor = self.db.connection.cursor()
+
+        cursor.execute("""
+            SELECT * FROM associacoes_pessoa_empresa WHERE id = ?
+        """, (associacao_id,))
+
+        row = cursor.fetchone()
+        return dict(row) if row else None
