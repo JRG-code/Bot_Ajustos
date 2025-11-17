@@ -137,13 +137,14 @@ class ContratosPublicosScraper:
             logger.error(f"Erro ao descarregar CSV: {e}")
             return None
 
-    def parse_csv_contratos(self, csv_path: Path, limit: Optional[int] = None) -> List[Dict[str, Any]]:
+    def parse_csv_contratos(self, csv_path: Path, limit: Optional[int] = None, size_limit_mb: Optional[int] = None) -> List[Dict[str, Any]]:
         """
         Faz parse de um ficheiro CSV de contratos
 
         Args:
             csv_path: Caminho do ficheiro CSV
             limit: Limite de registos a processar (opcional)
+            size_limit_mb: Limite de tamanho em MB a processar (opcional)
 
         Returns:
             Lista de contratos
@@ -153,9 +154,14 @@ class ContratosPublicosScraper:
         try:
             logger.info(f"A processar CSV: {csv_path}")
 
+            # Calcular limite de bytes se size_limit_mb foi especificado
+            size_limit_bytes = size_limit_mb * 1024 * 1024 if size_limit_mb else None
+            bytes_read = 0
+
             with open(csv_path, 'r', encoding='utf-8') as f:
                 # Detectar delimitador
                 sample = f.read(4096)
+                bytes_read += len(sample.encode('utf-8'))
                 f.seek(0)
 
                 delimiter = ';' if sample.count(';') > sample.count(',') else ','
@@ -163,8 +169,17 @@ class ContratosPublicosScraper:
                 reader = csv.DictReader(f, delimiter=delimiter)
 
                 for i, row in enumerate(reader):
+                    # Verificar limite de registos
                     if limit and i >= limit:
+                        logger.info(f"Limite de registos atingido: {limit}")
                         break
+
+                    # Verificar limite de tamanho
+                    if size_limit_bytes:
+                        current_pos = f.tell()
+                        if current_pos > size_limit_bytes:
+                            logger.info(f"Limite de tamanho atingido: {size_limit_mb} MB (processados {current_pos / (1024*1024):.2f} MB)")
+                            break
 
                     # Mapear campos do CSV para o formato interno
                     contrato = self._mapear_campos_csv(row)

@@ -253,9 +253,16 @@ class ContratosPublicosGUI:
         self.filtro_valor_max = ttk.Entry(filtros_frame, width=20)
         self.filtro_valor_max.grid(row=3, column=3, padx=5, pady=5)
 
+        # Tipo de Procedimento
+        ttk.Label(filtros_frame, text="Tipo de Procedimento:").grid(row=4, column=0, sticky=tk.W, padx=5, pady=5)
+        self.filtro_tipo_procedimento = ttk.Combobox(filtros_frame, width=20)
+        self.filtro_tipo_procedimento['values'] = ['', 'Ajuste direto', 'Concurso público', 'Concurso limitado por prévia qualificação',
+                                                     'Consulta prévia', 'Procedimento de negociação', 'Diálogo concorrencial']
+        self.filtro_tipo_procedimento.grid(row=4, column=1, columnspan=3, sticky=tk.W, padx=5, pady=5)
+
         # Botões
         buttons_frame = ttk.Frame(filtros_frame)
-        buttons_frame.grid(row=4, column=0, columnspan=4, pady=10)
+        buttons_frame.grid(row=5, column=0, columnspan=4, pady=10)
 
         ttk.Button(buttons_frame, text="Pesquisar", command=self.pesquisar_contratos).pack(side=tk.LEFT, padx=5)
         ttk.Button(buttons_frame, text="Limpar Filtros", command=self.limpar_filtros).pack(side=tk.LEFT, padx=5)
@@ -265,7 +272,7 @@ class ContratosPublicosGUI:
         resultados_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
 
         # Treeview de resultados
-        columns = ('ID', 'Adjudicante', 'Adjudicatária', 'Valor', 'Data', 'Tipo')
+        columns = ('ID', 'Adjudicante', 'Adjudicatária', 'Valor', 'Data', 'Tipo de Procedimento')
         self.resultados_tree = ttk.Treeview(
             resultados_frame,
             columns=columns,
@@ -281,7 +288,7 @@ class ContratosPublicosGUI:
         self.resultados_tree.column('Adjudicatária', width=200)
         self.resultados_tree.column('Valor', width=100)
         self.resultados_tree.column('Data', width=100)
-        self.resultados_tree.column('Tipo', width=150)
+        self.resultados_tree.column('Tipo de Procedimento', width=180)
 
         self.resultados_tree.pack(fill=tk.BOTH, expand=True, side=tk.LEFT)
 
@@ -499,6 +506,11 @@ class ContratosPublicosGUI:
         self.import_limit = ttk.Entry(config_frame, width=20)
         self.import_limit.insert(0, "1000")
         self.import_limit.pack(anchor=tk.W, pady=5)
+
+        ttk.Label(config_frame, text="Limite de tamanho do ficheiro (MB, 0 = sem limite):").pack(anchor=tk.W, pady=5)
+        self.import_size_limit = ttk.Entry(config_frame, width=20)
+        self.import_size_limit.insert(0, "500")
+        self.import_size_limit.pack(anchor=tk.W, pady=5)
 
         # Botão de importar
         ttk.Button(
@@ -1347,6 +1359,9 @@ Total: {len(conflitos)}
             if self.filtro_valor_max.get():
                 filtros['valor_max'] = float(self.filtro_valor_max.get())
 
+            if self.filtro_tipo_procedimento.get():
+                filtros['tipo_procedimento'] = self.filtro_tipo_procedimento.get()
+
             # Executar pesquisa
             resultados = self.db.pesquisar_contratos(filtros)
 
@@ -1363,7 +1378,7 @@ Total: {len(conflitos)}
                     contrato.get('adjudicataria', 'N/D'),
                     valor,
                     contrato.get('data_contrato', 'N/D'),
-                    contrato.get('tipo_contrato', 'N/D')
+                    contrato.get('tipo_procedimento', 'N/D')
                 ))
 
             self.update_status(f"Encontrados {len(resultados)} contratos")
@@ -1382,6 +1397,7 @@ Total: {len(conflitos)}
         self.filtro_adjudicataria.delete(0, tk.END)
         self.filtro_valor_min.delete(0, tk.END)
         self.filtro_valor_max.delete(0, tk.END)
+        self.filtro_tipo_procedimento.set('')
 
         self.resultados_tree.delete(*self.resultados_tree.get_children())
         self.update_status("Filtros limpos")
@@ -1691,27 +1707,35 @@ TOP 5 PARCEIROS:
         """Inicia o processo de importação de dados"""
         fonte = self.import_source.get()
         limite_str = self.import_limit.get()
+        limite_tamanho_str = self.import_size_limit.get()
 
         try:
             limite = int(limite_str) if limite_str and int(limite_str) > 0 else None
         except:
-            messagebox.showerror("Erro", "Limite inválido")
+            messagebox.showerror("Erro", "Limite de registos inválido")
+            return
+
+        try:
+            limite_tamanho_mb = int(limite_tamanho_str) if limite_tamanho_str and int(limite_tamanho_str) > 0 else None
+        except:
+            messagebox.showerror("Erro", "Limite de tamanho inválido")
             return
 
         self.import_log.delete(1.0, tk.END)
         self.log_import("Iniciando importação...")
         self.log_import(f"Fonte: {fonte}")
-        self.log_import(f"Limite: {limite or 'Sem limite'}\n")
+        self.log_import(f"Limite de registos: {limite or 'Sem limite'}")
+        self.log_import(f"Limite de tamanho: {limite_tamanho_mb or 'Sem limite'} MB\n")
 
         # Executar em thread separada para não bloquear a UI
         thread = threading.Thread(
             target=self._executar_importacao,
-            args=(fonte, limite),
+            args=(fonte, limite, limite_tamanho_mb),
             daemon=True
         )
         thread.start()
 
-    def _executar_importacao(self, fonte: str, limite: Optional[int]):
+    def _executar_importacao(self, fonte: str, limite: Optional[int], limite_tamanho_mb: Optional[int] = None):
         """Executa a importação em background"""
         try:
             if fonte == 'csv':
@@ -1728,9 +1752,20 @@ TOP 5 PARCEIROS:
                 from pathlib import Path
                 csv_path = Path(csv_path)
 
+                # Verificar tamanho do ficheiro
+                if limite_tamanho_mb:
+                    tamanho_mb = csv_path.stat().st_size / (1024 * 1024)
+                    self.log_import(f"Tamanho do ficheiro: {tamanho_mb:.2f} MB")
+
+                    if tamanho_mb > limite_tamanho_mb:
+                        self.log_import(f"AVISO: Ficheiro excede o limite de {limite_tamanho_mb} MB")
+                        self.log_import(f"A importação será limitada aos primeiros {limite_tamanho_mb} MB de dados\n")
+                    else:
+                        self.log_import(f"Tamanho dentro do limite ({limite_tamanho_mb} MB)\n")
+
                 self.log_import(f"A processar: {csv_path.name}\n")
 
-                contratos = self.scraper.parse_csv_contratos(csv_path, limit=limite)
+                contratos = self.scraper.parse_csv_contratos(csv_path, limit=limite, size_limit_mb=limite_tamanho_mb)
                 self.log_import(f"Parseados {len(contratos)} contratos\n")
 
                 stats = self.scraper.processar_lote_contratos(contratos, self.db)
@@ -1798,7 +1833,7 @@ TOP 5 PARCEIROS:
                 dados.append(valores)
 
             # Criar DataFrame
-            colunas = ['ID', 'Adjudicante', 'Adjudicatária', 'Valor', 'Data', 'Tipo']
+            colunas = ['ID', 'Adjudicante', 'Adjudicatária', 'Valor', 'Data', 'Tipo de Procedimento']
             df = pd.DataFrame(dados, columns=colunas)
 
             # Exportar
