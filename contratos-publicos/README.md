@@ -32,6 +32,23 @@ Aplicação desktop em Python para monitorizar, pesquisar e analisar contratos p
    ```
 
 3. **Execute a aplicação**
+
+   **Opção 1 - Launchers Simplificados (Recomendado):**
+
+   - **Windows**: Duplo clique em `Iniciar.bat`
+   - **Linux/Mac**: Execute `bash iniciar.sh` ou `./iniciar.sh`
+
+   **Opção 2 - Comando direto:**
+   ```bash
+   python launcher.pyw
+   ```
+
+   **Opção 3 - Modo diagnóstico (se houver problemas):**
+   ```bash
+   python diagnostico.py
+   ```
+
+   **Opção 4 - Modo tradicional:**
    ```bash
    python main.py
    ```

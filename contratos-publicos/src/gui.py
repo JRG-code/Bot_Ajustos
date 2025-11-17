@@ -536,6 +536,9 @@ class ContratosPublicosGUI:
         ttk.Button(action_frame, text="Ver Contratos", command=self.ver_contratos_figura).pack(
             side=tk.LEFT, padx=5
         )
+        ttk.Button(action_frame, text="Criar Associação", command=self.criar_associacao_figura).pack(
+            side=tk.LEFT, padx=5
+        )
         ttk.Button(action_frame, text="Remover Figura", command=self.remover_figura_selecionada).pack(
             side=tk.LEFT, padx=5
         )
@@ -1071,37 +1074,65 @@ PROJEÇÕES:
         )
         titulo.pack(pady=10)
 
-        # Frame de pesquisa
-        search_frame = ttk.LabelFrame(assoc_frame, text="Pesquisar", padding=10)
-        search_frame.pack(fill=tk.X, padx=20, pady=10)
-
-        ttk.Label(search_frame, text="Nome (pessoa ou empresa):").pack(side=tk.LEFT, padx=5)
-        self.assoc_search_entry = ttk.Entry(search_frame, width=40)
-        self.assoc_search_entry.pack(side=tk.LEFT, padx=5)
+        # Frame de ações
+        action_frame = ttk.Frame(assoc_frame)
+        action_frame.pack(fill=tk.X, padx=20, pady=10)
 
         ttk.Button(
-            search_frame,
-            text="Pesquisar Contratos",
-            command=self.pesquisar_por_associacao
-        ).pack(side=tk.LEFT, padx=5)
-
-        ttk.Button(
-            search_frame,
-            text="Adicionar Associação",
+            action_frame,
+            text="➕ Adicionar Associação",
             command=self.adicionar_associacao_dialog
         ).pack(side=tk.LEFT, padx=5)
 
-        # Frame de resultados
-        results_frame = ttk.LabelFrame(assoc_frame, text="Resultados", padding=10)
-        results_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+        ttk.Button(
+            action_frame,
+            text="🔄 Atualizar Lista",
+            command=self.atualizar_lista_associacoes
+        ).pack(side=tk.LEFT, padx=5)
 
-        # Texto de resultados
-        self.assoc_results_text = scrolledtext.ScrolledText(
-            results_frame,
-            height=20,
-            wrap=tk.WORD
+        ttk.Button(
+            action_frame,
+            text="🔍 Pesquisar Contratos",
+            command=self.pesquisar_por_associacao
+        ).pack(side=tk.LEFT, padx=5)
+
+        # Frame de lista de associações
+        lista_frame = ttk.LabelFrame(assoc_frame, text="Associações Cadastradas", padding=10)
+        lista_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+
+        # Treeview de associações
+        columns = ('ID', 'Pessoa', 'Empresa', 'Relação', 'Participação %', 'Status', 'Notas')
+        self.associacoes_tree = ttk.Treeview(
+            lista_frame,
+            columns=columns,
+            show='headings',
+            height=15
         )
-        self.assoc_results_text.pack(fill=tk.BOTH, expand=True)
+
+        for col in columns:
+            self.associacoes_tree.heading(col, text=col)
+
+        self.associacoes_tree.column('ID', width=40)
+        self.associacoes_tree.column('Pessoa', width=200)
+        self.associacoes_tree.column('Empresa', width=200)
+        self.associacoes_tree.column('Relação', width=100)
+        self.associacoes_tree.column('Participação %', width=100)
+        self.associacoes_tree.column('Status', width=70)
+        self.associacoes_tree.column('Notas', width=200)
+
+        self.associacoes_tree.pack(fill=tk.BOTH, expand=True, side=tk.LEFT)
+
+        # Scrollbar
+        scrollbar = ttk.Scrollbar(lista_frame, orient=tk.VERTICAL,
+                                 command=self.associacoes_tree.yview)
+        self.associacoes_tree.configure(yscroll=scrollbar.set)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        # Bind duplo clique para ver detalhes
+        self.associacoes_tree.bind('<Double-1>', self.mostrar_detalhes_associacao)
+
+        # Carregar associações iniciais
+        self.atualizar_lista_associacoes()
 
     # ==================== MÉTODOS DE ANÁLISE ====================
 
@@ -1328,6 +1359,206 @@ EMPRESAS ASSOCIADAS ({len(resultado['empresas_associadas'])}):
             logger.error(f"Erro na pesquisa: {e}")
             messagebox.showerror("Erro", f"Erro: {e}")
 
+    def atualizar_lista_associacoes(self):
+        """Atualiza a lista de associações"""
+        try:
+            self.associacoes_tree.delete(*self.associacoes_tree.get_children())
+
+            # Obter todas as associações
+            associacoes = self.associations_manager.listar_associacoes()
+
+            for assoc in associacoes:
+                # Obter nome da pessoa
+                pessoa_id = assoc.get('pessoa_id')
+                pessoa = self.associations_manager.obter_pessoa(pessoa_id)
+                pessoa_nome = pessoa.get('nome', 'N/D') if pessoa else 'N/D'
+
+                # Formatação
+                empresa = assoc.get('empresa_nome', 'N/D')
+                relacao = assoc.get('tipo_relacao', 'N/D')
+                participacao = assoc.get('percentagem_participacao')
+                participacao_str = f"{participacao}%" if participacao else "N/D"
+                status = "Ativo" if assoc.get('ativo') else "Inativo"
+                notas = assoc.get('notas', '')[:50] + '...' if len(assoc.get('notas', '')) > 50 else assoc.get('notas', '')
+
+                self.associacoes_tree.insert('', 'end', values=(
+                    assoc.get('id'),
+                    pessoa_nome,
+                    empresa,
+                    relacao,
+                    participacao_str,
+                    status,
+                    notas
+                ))
+
+            self.update_status(f"{len(associacoes)} associações cadastradas")
+
+        except Exception as e:
+            logger.error(f"Erro ao atualizar associações: {e}")
+
+    def mostrar_detalhes_associacao(self, event):
+        """Mostra detalhes de uma associação selecionada"""
+        selection = self.associacoes_tree.selection()
+        if not selection:
+            return
+
+        item = self.associacoes_tree.item(selection[0])
+        assoc_id = item['values'][0]
+
+        try:
+            # Obter dados da associação
+            assoc = self.associations_manager.obter_associacao(assoc_id)
+            if not assoc:
+                return
+
+            # Obter pessoa
+            pessoa = self.associations_manager.obter_pessoa(assoc.get('pessoa_id'))
+
+            # Criar janela de detalhes
+            detalhes_window = tk.Toplevel(self.root)
+            detalhes_window.title(f"Detalhes da Associação #{assoc_id}")
+            detalhes_window.geometry("600x500")
+
+            texto = f"""
+═══════════════════════════════════════════════════
+DETALHES DA ASSOCIAÇÃO
+═══════════════════════════════════════════════════
+
+ID: {assoc.get('id')}
+
+PESSOA:
+  Nome: {pessoa.get('nome', 'N/D') if pessoa else 'N/D'}
+  Cargo Político: {pessoa.get('cargo_politico', 'N/D') if pessoa else 'N/D'}
+  Partido: {pessoa.get('partido', 'N/D') if pessoa else 'N/D'}
+
+EMPRESA:
+  Nome: {assoc.get('empresa_nome', 'N/D')}
+  NIF: {assoc.get('empresa_nif', 'N/D')}
+
+RELAÇÃO:
+  Tipo: {assoc.get('tipo_relacao', 'N/D')}
+  Participação: {assoc.get('percentagem_participacao', 'N/D')}%
+  Data Início: {assoc.get('data_inicio', 'N/D')}
+  Data Fim: {assoc.get('data_fim', 'N/D')}
+
+STATUS: {"Ativo" if assoc.get('ativo') else "Inativo"}
+
+FONTE: {assoc.get('fonte', 'N/D')}
+
+NOTAS:
+{assoc.get('notas', 'Sem notas')}
+
+Data de Adição: {assoc.get('data_adicao', 'N/D')}
+═══════════════════════════════════════════════════
+            """
+
+            text_widget = scrolledtext.ScrolledText(detalhes_window, wrap=tk.WORD)
+            text_widget.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+            text_widget.insert(tk.END, texto)
+            text_widget.config(state=tk.DISABLED)
+
+            ttk.Button(detalhes_window, text="Fechar",
+                      command=detalhes_window.destroy).pack(pady=10)
+
+        except Exception as e:
+            logger.error(f"Erro ao mostrar detalhes: {e}")
+            messagebox.showerror("Erro", f"Erro: {e}")
+
+    def criar_associacao_figura(self):
+        """Cria associação a partir da figura selecionada"""
+        selection = self.figuras_tree.selection()
+        if not selection:
+            messagebox.showwarning("Aviso", "Selecione uma figura primeiro!")
+            return
+
+        item = self.figuras_tree.item(selection[0])
+        figura_nome = item['values'][1]
+        figura_tipo = item['values'][3]
+
+        # Abrir diálogo pré-preenchido
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Criar Associação")
+        dialog.geometry("500x450")
+
+        ttk.Label(dialog, text=f"Criar associação para: {figura_nome} ({figura_tipo})",
+                 font=('Arial', 10, 'bold')).grid(row=0, column=0, columnspan=2, pady=10)
+
+        if figura_tipo == 'pessoa':
+            # Pessoa -> Empresa
+            ttk.Label(dialog, text="Nome da Pessoa:").grid(row=1, column=0, padx=5, pady=5, sticky=tk.W)
+            nome_entry = ttk.Entry(dialog, width=40)
+            nome_entry.insert(0, figura_nome)
+            nome_entry.grid(row=1, column=1, padx=5, pady=5)
+
+            ttk.Label(dialog, text="Cargo Político:").grid(row=2, column=0, padx=5, pady=5, sticky=tk.W)
+            cargo_entry = ttk.Entry(dialog, width=40)
+            cargo_entry.grid(row=2, column=1, padx=5, pady=5)
+
+            ttk.Label(dialog, text="Empresa:").grid(row=3, column=0, padx=5, pady=5, sticky=tk.W)
+            empresa_entry = ttk.Entry(dialog, width=40)
+            empresa_entry.grid(row=3, column=1, padx=5, pady=5)
+
+            ttk.Label(dialog, text="Tipo Relação:").grid(row=4, column=0, padx=5, pady=5, sticky=tk.W)
+            tipo_combo = ttk.Combobox(dialog, width=37)
+            tipo_combo['values'] = ['dono', 'socio', 'gerente', 'administrador', 'familiar', 'conselheiro', 'outro']
+            tipo_combo.set('socio')
+            tipo_combo.grid(row=4, column=1, padx=5, pady=5)
+
+        else:
+            # Empresa -> Pessoa
+            ttk.Label(dialog, text="Nome da Pessoa:").grid(row=1, column=0, padx=5, pady=5, sticky=tk.W)
+            nome_entry = ttk.Entry(dialog, width=40)
+            nome_entry.grid(row=1, column=1, padx=5, pady=5)
+
+            ttk.Label(dialog, text="Cargo Político:").grid(row=2, column=0, padx=5, pady=5, sticky=tk.W)
+            cargo_entry = ttk.Entry(dialog, width=40)
+            cargo_entry.grid(row=2, column=1, padx=5, pady=5)
+
+            ttk.Label(dialog, text="Empresa:").grid(row=3, column=0, padx=5, pady=5, sticky=tk.W)
+            empresa_entry = ttk.Entry(dialog, width=40)
+            empresa_entry.insert(0, figura_nome)
+            empresa_entry.grid(row=3, column=1, padx=5, pady=5)
+
+            ttk.Label(dialog, text="Tipo Relação:").grid(row=4, column=0, padx=5, pady=5, sticky=tk.W)
+            tipo_combo = ttk.Combobox(dialog, width=37)
+            tipo_combo['values'] = ['dono', 'socio', 'gerente', 'administrador', 'familiar', 'conselheiro', 'outro']
+            tipo_combo.set('socio')
+            tipo_combo.grid(row=4, column=1, padx=5, pady=5)
+
+        ttk.Label(dialog, text="Fonte:").grid(row=5, column=0, padx=5, pady=5, sticky=tk.W)
+        fonte_entry = ttk.Entry(dialog, width=40)
+        fonte_entry.grid(row=5, column=1, padx=5, pady=5)
+
+        ttk.Label(dialog, text="Notas:").grid(row=6, column=0, padx=5, pady=5, sticky=tk.W)
+        notas_entry = ttk.Entry(dialog, width=40)
+        notas_entry.grid(row=6, column=1, padx=5, pady=5)
+
+        def guardar():
+            try:
+                # Adicionar pessoa
+                pessoa_id = self.associations_manager.adicionar_pessoa(
+                    nome=nome_entry.get(),
+                    cargo_politico=cargo_entry.get()
+                )
+
+                # Adicionar associação
+                self.associations_manager.associar_pessoa_empresa(
+                    pessoa_id=pessoa_id,
+                    empresa_nome=empresa_entry.get(),
+                    tipo_relacao=tipo_combo.get(),
+                    fonte=fonte_entry.get(),
+                    notas=notas_entry.get()
+                )
+
+                messagebox.showinfo("Sucesso", "Associação criada!")
+                self.atualizar_lista_associacoes()
+                dialog.destroy()
+
+            except Exception as e:
+                messagebox.showerror("Erro", f"Erro: {e}")
+
+        ttk.Button(dialog, text="Guardar", command=guardar).grid(row=7, column=0, columnspan=2, pady=20)
+
     def adicionar_associacao_dialog(self):
         """Diálogo para adicionar associação pessoa-empresa"""
         dialog = tk.Toplevel(self.root)
@@ -1403,6 +1634,10 @@ EMPRESAS ASSOCIADAS ({len(resultado['empresas_associadas'])}):
         info_label = ttk.Label(dialog, text=info_text, foreground='blue')
         info_label.grid(row=8, column=0, columnspan=2, padx=10, pady=10)
 
+        ttk.Label(dialog, text="Notas:").grid(row=5, column=0, padx=5, pady=5, sticky=tk.W)
+        notas_entry = ttk.Entry(dialog, width=40)
+        notas_entry.grid(row=5, column=1, padx=5, pady=5)
+
         def guardar():
             nome_pessoa = nome_entry.get().strip()
             cargo = cargo_entry.get().strip() or None
@@ -1447,7 +1682,8 @@ EMPRESAS ASSOCIADAS ({len(resultado['empresas_associadas'])}):
                     pessoa_id=assoc_pessoa_id,
                     empresa_nome=empresa,
                     tipo_relacao=tipo_relacao,
-                    fonte=fonte
+                    fonte=fonte,
+                    notas=notas_entry.get()  # Campo notas adicionado
                 )
 
                 messagebox.showinfo(
@@ -1460,6 +1696,7 @@ EMPRESAS ASSOCIADAS ({len(resultado['empresas_associadas'])}):
 
                 # Atualizar listas e cache
                 self.atualizar_lista_figuras()
+                self.atualizar_lista_associacoes()  # Atualizar lista de associações também
                 self.suggestions_manager.limpar_cache()
 
                 dialog.destroy()
