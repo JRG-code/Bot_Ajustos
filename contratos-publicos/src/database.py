@@ -123,6 +123,7 @@ class DatabaseManager:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_contratos_data ON contratos(data_contrato)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_contratos_valor ON contratos(valor)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_contratos_distrito ON contratos(distrito)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_contratos_tipo_procedimento ON contratos(tipo_procedimento)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_figuras_nome ON figuras_interesse(nome)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_alertas_lido ON alertas(lido)")
 
