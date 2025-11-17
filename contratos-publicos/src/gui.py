@@ -83,6 +83,9 @@ class ContratosPublicosGUI:
         main_frame = ttk.Frame(self.root)
         main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
+        # Frame de filtro rápido (topo)
+        self.create_quick_filter_bar(main_frame)
+
         # Criar notebook (abas)
         self.notebook = ttk.Notebook(main_frame)
         self.notebook.pack(fill=tk.BOTH, expand=True)
@@ -99,6 +102,135 @@ class ContratosPublicosGUI:
 
         # Barra de status
         self.create_status_bar()
+
+    def create_quick_filter_bar(self, parent):
+        """Cria barra de filtro rápido no topo"""
+        filter_frame = ttk.Frame(parent)
+        filter_frame.pack(fill=tk.X, pady=(0, 10))
+
+        # Label à esquerda
+        ttk.Label(
+            filter_frame,
+            text="Filtro Rápido:",
+            font=('Arial', 10, 'bold')
+        ).pack(side=tk.LEFT, padx=(0, 10))
+
+        # Combobox com autocomplete no centro-direita
+        ttk.Label(filter_frame, text="Figura de Interesse:").pack(side=tk.LEFT, padx=(0, 5))
+
+        self.quick_filter_var = tk.StringVar()
+        self.quick_filter_combo = ttk.Combobox(
+            filter_frame,
+            textvariable=self.quick_filter_var,
+            width=40,
+            state='normal'
+        )
+        self.quick_filter_combo.pack(side=tk.LEFT, padx=(0, 10))
+
+        # Bind para autocomplete
+        self.quick_filter_combo.bind('<KeyRelease>', self.on_quick_filter_keyrelease)
+        self.quick_filter_combo.bind('<<ComboboxSelected>>', self.on_quick_filter_select)
+
+        # Botão de pesquisa
+        ttk.Button(
+            filter_frame,
+            text="Ver Contratos",
+            command=self.aplicar_filtro_rapido,
+            width=15
+        ).pack(side=tk.LEFT, padx=(0, 5))
+
+        # Botão de limpar
+        ttk.Button(
+            filter_frame,
+            text="Limpar",
+            command=self.limpar_filtro_rapido,
+            width=10
+        ).pack(side=tk.LEFT)
+
+        # Carregar figuras iniciais
+        self.atualizar_quick_filter_figuras()
+
+    def atualizar_quick_filter_figuras(self):
+        """Atualiza a lista de figuras no filtro rápido"""
+        try:
+            figuras = self.db.listar_figuras_interesse(apenas_ativas=True)
+            # Criar lista de nomes formatados
+            self.figuras_dict = {}
+            figuras_nomes = []
+
+            for figura in figuras:
+                nome = figura.get('nome', '')
+                tipo = figura.get('tipo', '')
+                nif = figura.get('nif', '')
+
+                # Formato: "Nome (Tipo) [NIF]" ou "Nome (Tipo)" se não tiver NIF
+                if nif:
+                    nome_formatado = f"{nome} ({tipo}) [{nif}]"
+                else:
+                    nome_formatado = f"{nome} ({tipo})"
+
+                figuras_nomes.append(nome_formatado)
+                self.figuras_dict[nome_formatado] = figura
+
+            self.quick_filter_combo['values'] = figuras_nomes
+
+        except Exception as e:
+            logger.error(f"Erro ao atualizar figuras do filtro rápido: {e}")
+
+    def on_quick_filter_keyrelease(self, event):
+        """Implementa autocomplete no filtro rápido"""
+        if event.keysym in ('BackSpace', 'Delete', 'Up', 'Down', 'Left', 'Right'):
+            return
+
+        value = self.quick_filter_var.get().lower()
+
+        if value == '':
+            self.quick_filter_combo['values'] = [k for k in self.figuras_dict.keys()]
+        else:
+            # Filtrar figuras que contêm o texto digitado
+            filtered = [k for k in self.figuras_dict.keys() if value in k.lower()]
+            self.quick_filter_combo['values'] = filtered
+
+    def on_quick_filter_select(self, event):
+        """Quando uma figura é selecionada no filtro rápido"""
+        # Pode aplicar automaticamente ou esperar o clique no botão
+        pass
+
+    def aplicar_filtro_rapido(self):
+        """Aplica o filtro rápido e mostra contratos da figura selecionada"""
+        selecionado = self.quick_filter_var.get()
+
+        if not selecionado:
+            messagebox.showwarning("Aviso", "Selecione uma figura de interesse primeiro")
+            return
+
+        if selecionado not in self.figuras_dict:
+            messagebox.showwarning("Aviso", "Figura não encontrada. Use uma das opções da lista.")
+            return
+
+        figura = self.figuras_dict[selecionado]
+        figura_id = figura.get('id')
+
+        # Mudar para a aba de pesquisa
+        self.notebook.select(1)  # Índice da aba "Pesquisar Contratos"
+
+        # Preencher filtro com a figura
+        self.filtro_adjudicante.delete(0, tk.END)
+        self.filtro_adjudicataria.delete(0, tk.END)
+
+        nome_figura = figura.get('nome', '')
+        # Preencher nos dois campos para pegar contratos onde a figura aparece
+        self.filtro_adjudicante.insert(0, nome_figura)
+
+        # Executar pesquisa
+        self.pesquisar_contratos()
+
+        self.update_status(f"Mostrando contratos de: {nome_figura}")
+
+    def limpar_filtro_rapido(self):
+        """Limpa o filtro rápido"""
+        self.quick_filter_var.set('')
+        self.atualizar_quick_filter_figuras()
 
     def create_menu_bar(self):
         """Cria a barra de menu"""
@@ -1515,6 +1647,9 @@ Link BASE: {contrato.get('link_base', 'N/D')}
                     n_contratos,
                     status
                 ))
+
+            # Atualizar também o filtro rápido
+            self.atualizar_quick_filter_figuras()
 
             self.update_status(f"{len(figuras)} figuras de interesse")
 
