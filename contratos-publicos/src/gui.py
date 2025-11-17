@@ -122,7 +122,7 @@ class ContratosPublicosGUI:
         # Menu Análise Avançada
         analise_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Análise Avançada", menu=analise_menu)
-        analise_menu.add_command(label="Analisar Padrões Suspeitos", command=self.analisar_padroes_suspeitos)
+        analise_menu.add_command(label="Analisar Padrões Suspeitos", command=self.analisar_todos_contratos_suspeitos)
         analise_menu.add_command(label="Detectar Conflitos de Interesse", command=self.detectar_conflitos_interesse)
         analise_menu.add_command(label="Configurar Detecção", command=self.configurar_deteccao)
         analise_menu.add_separator()
