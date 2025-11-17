@@ -479,7 +479,7 @@ class ContratosPublicosGUI:
 
         ttk.Radiobutton(
             opcoes_frame,
-            text="Dados Abertos (dados.gov.pt)",
+            text="Portal BASE (download automático - BASE.gov.pt)",
             variable=self.import_source,
             value='dados_abertos'
         ).pack(anchor=tk.W, pady=5)
@@ -1752,12 +1752,98 @@ TOP 5 PARCEIROS:
                 self.root.after(0, self.atualizar_dashboard)
 
             elif fonte == 'dados_abertos':
-                self.log_import("Importação de dados abertos ainda não implementada")
-                self.log_import("Use ficheiro CSV por agora")
+                self.log_import("=== IMPORTAÇÃO DO PORTAL BASE ===\n")
+                self.log_import("A descarregar contratos do Portal BASE (BASE.gov.pt)...")
+                self.log_import("AVISO: Downloads grandes podem demorar vários minutos!\n")
+
+                # Perguntar o ano (opcional)
+                from tkinter import simpledialog
+                resposta = messagebox.askyesno(
+                    "Filtrar por Ano",
+                    "Deseja importar apenas um ano específico?\n\n"
+                    "• SIM: Escolher um ano (mais rápido, ficheiro menor)\n"
+                    "• NÃO: Importar TODOS os anos disponíveis\n"
+                    "  (AVISO: Pode ser MUITO grande - centenas de MB e demorar minutos!)"
+                )
+
+                ano = None
+                if resposta:  # User wants to select a year
+                    ano = simpledialog.askinteger(
+                        "Ano dos Contratos",
+                        "Digite o ano (2012-2025):",
+                        minvalue=2012,
+                        maxvalue=2025,
+                        parent=self.root
+                    )
+                    if ano is None:  # User cancelled
+                        self.log_import("Importação cancelada")
+                        return
+
+                ano_str = str(ano) if ano else "TODOS"
+                self.log_import(f"Ano selecionado: {ano_str}\n")
+
+                # Download do CSV
+                from pathlib import Path
+                csv_path = self.scraper.download_contratos_base_gov(ano=ano)
+
+                if not csv_path or not Path(csv_path).exists():
+                    self.log_import("\nERRO: Não foi possível descarregar os dados")
+                    self.log_import("Possíveis causas:")
+                    self.log_import("  • Sem conexão à internet")
+                    self.log_import("  • Portal BASE indisponível")
+                    self.log_import("  • Timeout (ficheiro muito grande)")
+                    self.log_import("\nSolução: Tente:")
+                    self.log_import("  1. Verificar a conexão")
+                    self.log_import("  2. Escolher um ano específico (ficheiro menor)")
+                    self.log_import("  3. Importar ficheiro CSV manualmente")
+                    return
+
+                self.log_import(f"\nFicheiro descarregado: {csv_path}")
+                self.log_import("A processar contratos...\n")
+
+                # Parse do CSV
+                contratos = self.scraper.parse_csv_contratos(Path(csv_path), limit=limite)
+                self.log_import(f"Parseados {len(contratos)} contratos\n")
+
+                if not contratos:
+                    self.log_import("\nERRO: Nenhum contrato encontrado no ficheiro")
+                    self.log_import("O ficheiro pode estar vazio ou em formato incorreto")
+                    return
+
+                # Processar e inserir na BD
+                self.log_import("A inserir contratos na base de dados...")
+                stats = self.scraper.processar_lote_contratos(contratos, self.db)
+
+                self.log_import("\n=== RESULTADO ===")
+                self.log_import(f"Total processados: {stats['total']}")
+                self.log_import(f"✓ Inseridos: {stats['inseridos']}")
+                self.log_import(f"⊗ Duplicados: {stats['duplicados']}")
+                self.log_import(f"✗ Inválidos: {stats['invalidos']}")
+
+                # Verificar alertas
+                self.log_import("\nA verificar figuras de interesse...")
+                alertas = self.alerts_manager.verificar_novos_contratos(contratos)
+                self.log_import(f"Gerados {len(alertas)} alertas\n")
+
+                messagebox.showinfo("Sucesso",
+                    f"Importação concluída!\n\n"
+                    f"Inseridos: {stats['inseridos']}\n"
+                    f"Duplicados: {stats['duplicados']}\n"
+                    f"Alertas: {len(alertas)}")
+
+                # Atualizar dashboard
+                self.root.after(0, self.atualizar_dashboard)
 
             elif fonte == 'api':
-                self.log_import("Importação via API ainda não implementada")
-                self.log_import("Use ficheiro CSV por agora")
+                self.log_import("=== IMPORTAÇÃO VIA API ===\n")
+                self.log_import("A importação via API oficial requer credenciais do IMPIC")
+                self.log_import("\nPara obter acesso à API:")
+                self.log_import("  1. Aceder a https://www.base.gov.pt")
+                self.log_import("  2. Contactar o IMPIC para solicitar credenciais")
+                self.log_import("  3. Configurar as credenciais na aplicação")
+                self.log_import("\nPor agora, use:")
+                self.log_import("  • 'Dados Abertos' (download automático do Portal BASE)")
+                self.log_import("  • 'Ficheiro CSV' (importação manual)")
 
         except Exception as e:
             logger.error(f"Erro na importação: {e}")

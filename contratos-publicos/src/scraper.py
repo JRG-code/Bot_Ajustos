@@ -137,6 +137,89 @@ class ContratosPublicosScraper:
             logger.error(f"Erro ao descarregar CSV: {e}")
             return None
 
+    def download_contratos_base_gov(self, ano: Optional[int] = None,
+                                     limite: Optional[int] = None,
+                                     output_path: Optional[Path] = None) -> Optional[Path]:
+        """
+        Faz download de contratos diretamente do Portal BASE usando exportação CSV
+
+        Args:
+            ano: Ano dos contratos (opcional, None = todos os anos)
+            limite: Número máximo de contratos (None = todos)
+            output_path: Caminho onde guardar (opcional)
+
+        Returns:
+            Caminho do ficheiro descarregado ou None
+        """
+        try:
+            # URL base de exportação do Portal BASE
+            # Baseado em: https://www.base.gov.pt/Base4/pt/resultados/?type=csv_contratos
+            base_url = "https://www.base.gov.pt/Base4/pt/resultados/"
+
+            params = {
+                'type': 'csv_contratos',
+                'texto': '',  # Busca sem filtro de texto
+                'tipo': '0',  # Todos os tipos
+                'tipocontrato': '0',  # Todos os tipos de contrato
+                'pais': '0',  # Todos os países
+                'distrito': '0',  # Todos os distritos
+                'concelho': '0',  # Todos os concelhos
+            }
+
+            if ano:
+                # Adicionar filtro de ano se especificado
+                params['ano'] = str(ano)
+
+            logger.info(f"A descarregar contratos do Portal BASE (ano: {ano or 'todos'})")
+            logger.info("ATENÇÃO: Downloads grandes podem demorar vários minutos...")
+
+            self._rate_limit()
+
+            # Fazer o pedido
+            response = self.session.get(base_url, params=params, stream=True, timeout=120)
+            response.raise_for_status()
+
+            if not output_path:
+                sufixo = f"_{ano}" if ano else "_completo"
+                output_path = Path(f"data/contratos_base{sufixo}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv")
+
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+
+            # Download com barra de progresso
+            total_size = int(response.headers.get('content-length', 0))
+
+            logger.info(f"Tamanho estimado: {total_size / 1024 / 1024:.2f} MB" if total_size > 0 else "Tamanho desconhecido")
+
+            with open(output_path, 'wb') as f:
+                if total_size > 0:
+                    with tqdm(total=total_size, unit='B', unit_scale=True, desc="Download BASE") as pbar:
+                        for chunk in response.iter_content(chunk_size=8192):
+                            if chunk:
+                                f.write(chunk)
+                                pbar.update(len(chunk))
+                else:
+                    # Sem tamanho conhecido, mostrar apenas chunks
+                    chunks_downloaded = 0
+                    for chunk in response.iter_content(chunk_size=8192):
+                        if chunk:
+                            f.write(chunk)
+                            chunks_downloaded += 1
+                            if chunks_downloaded % 1000 == 0:
+                                logger.info(f"Downloaded {chunks_downloaded} chunks...")
+
+            logger.info(f"CSV descarregado com sucesso: {output_path}")
+            logger.info(f"Tamanho final: {output_path.stat().st_size / 1024 / 1024:.2f} MB")
+
+            return output_path
+
+        except requests.exceptions.Timeout:
+            logger.error("Timeout ao descarregar dados - o ficheiro pode ser muito grande")
+            logger.info("Tente usar um ano específico ou contactar o BASE para obter os dados")
+            return None
+        except Exception as e:
+            logger.error(f"Erro ao descarregar do BASE: {e}")
+            return None
+
     def parse_csv_contratos(self, csv_path: Path, limit: Optional[int] = None) -> List[Dict[str, Any]]:
         """
         Faz parse de um ficheiro CSV de contratos
