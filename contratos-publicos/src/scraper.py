@@ -239,12 +239,10 @@ class ContratosPublicosScraper:
 
             # Calcular limite de bytes se size_limit_mb foi especificado
             size_limit_bytes = size_limit_mb * 1024 * 1024 if size_limit_mb else None
-            bytes_read = 0
 
             with open(csv_path, 'r', encoding='utf-8') as f:
                 # Detectar delimitador
                 sample = f.read(4096)
-                bytes_read += len(sample.encode('utf-8'))
                 f.seek(0)
 
                 delimiter = ';' if sample.count(';') > sample.count(',') else ','
@@ -257,8 +255,8 @@ class ContratosPublicosScraper:
                         logger.info(f"Limite de registos atingido: {limit}")
                         break
 
-                    # Verificar limite de tamanho
-                    if size_limit_bytes:
+                    # Verificar limite de tamanho (otimizado: apenas a cada 100 linhas para reduzir I/O)
+                    if size_limit_bytes and i % 100 == 0:
                         current_pos = f.tell()
                         if current_pos > size_limit_bytes:
                             logger.info(f"Limite de tamanho atingido: {size_limit_mb} MB (processados {current_pos / (1024*1024):.2f} MB)")
