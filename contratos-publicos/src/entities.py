@@ -25,7 +25,9 @@ class EntitiesManager:
     # ==================== GESTÃO DE FIGURAS ====================
 
     def adicionar_figura(self, nome: str, nif: Optional[str] = None,
-                        tipo: str = 'pessoa', notas: str = '') -> int:
+                        tipo: str = 'pessoa', notas: str = '',
+                        cargo_governamental: Optional[str] = None,
+                        partido: Optional[str] = None) -> int:
         """
         Adiciona uma nova figura de interesse
 
@@ -34,11 +36,15 @@ class EntitiesManager:
             nif: NIF da entidade
             tipo: Tipo (pessoa, empresa, entidade_publica)
             notas: Notas adicionais
+            cargo_governamental: Cargo governamental se aplicável
+            partido: Partido político se aplicável
 
         Returns:
             ID da figura adicionada
         """
-        figura_id = self.db.adicionar_figura_interesse(nome, nif, tipo, notas)
+        figura_id = self.db.adicionar_figura_interesse(
+            nome, nif, tipo, notas, cargo_governamental, partido
+        )
         logger.info(f"Figura de interesse adicionada: {nome} (ID: {figura_id})")
         return figura_id
 

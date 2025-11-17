@@ -18,6 +18,7 @@ from alerts import AlertsManager
 from sync import SyncManager
 from suspicious_patterns import SuspiciousPatternDetector, LimitesLegais, analisar_todos_contratos
 from associations import AssociationsManager
+from autocomplete import AutocompleteEntry, SuggestionsManager
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +45,7 @@ class ContratosPublicosGUI:
         self.sync_manager = SyncManager(self.db, self.scraper)
         self.suspicious_detector = SuspiciousPatternDetector()
         self.associations_manager = AssociationsManager(self.db)
+        self.suggestions_manager = SuggestionsManager(self.db)
 
         # Configurar estilo
         self.setup_styles()
@@ -303,32 +305,56 @@ class ContratosPublicosGUI:
         add_frame = ttk.LabelFrame(figures_frame, text="Adicionar Figura de Interesse", padding=10)
         add_frame.pack(fill=tk.X, padx=20, pady=10)
 
-        # Nome
+        # Linha 0: Nome e NIF
         ttk.Label(add_frame, text="Nome:").grid(row=0, column=0, sticky=tk.W, padx=5, pady=5)
         self.figura_nome = ttk.Entry(add_frame, width=30)
         self.figura_nome.grid(row=0, column=1, padx=5, pady=5)
 
-        # NIF
         ttk.Label(add_frame, text="NIF (opcional):").grid(row=0, column=2, sticky=tk.W, padx=5, pady=5)
         self.figura_nif = ttk.Entry(add_frame, width=20)
         self.figura_nif.grid(row=0, column=3, padx=5, pady=5)
 
-        # Tipo
+        # Linha 1: Tipo
         ttk.Label(add_frame, text="Tipo:").grid(row=1, column=0, sticky=tk.W, padx=5, pady=5)
-        self.figura_tipo = ttk.Combobox(add_frame, width=27)
+        self.figura_tipo = ttk.Combobox(add_frame, width=27, state='readonly')
         self.figura_tipo['values'] = ['pessoa', 'empresa', 'entidade_publica']
         self.figura_tipo.set('pessoa')
         self.figura_tipo.grid(row=1, column=1, padx=5, pady=5)
+        self.figura_tipo.bind('<<ComboboxSelected>>', self._on_tipo_figura_changed)
 
-        # Notas
-        ttk.Label(add_frame, text="Notas:").grid(row=1, column=2, sticky=tk.W, padx=5, pady=5)
-        self.figura_notas = ttk.Entry(add_frame, width=20)
-        self.figura_notas.grid(row=1, column=3, padx=5, pady=5)
-
-        # Botão adicionar
-        ttk.Button(add_frame, text="Adicionar Figura", command=self.adicionar_figura).grid(
-            row=2, column=0, columnspan=4, pady=10
+        # Linha 2: Cargo Governamental (só para pessoas)
+        self.label_cargo = ttk.Label(add_frame, text="Cargo Governamental:")
+        self.label_cargo.grid(row=2, column=0, sticky=tk.W, padx=5, pady=5)
+        self.figura_cargo = AutocompleteEntry(
+            add_frame,
+            suggestions_callback=self.suggestions_manager.get_cargos,
+            width=27
         )
+        self.figura_cargo.grid(row=2, column=1, padx=5, pady=5)
+
+        # Linha 2: Partido (só para pessoas com cargo)
+        self.label_partido = ttk.Label(add_frame, text="Partido:")
+        self.label_partido.grid(row=2, column=2, sticky=tk.W, padx=5, pady=5)
+        self.figura_partido = AutocompleteEntry(
+            add_frame,
+            suggestions_callback=self.suggestions_manager.get_partidos,
+            width=18
+        )
+        self.figura_partido.grid(row=2, column=3, padx=5, pady=5)
+
+        # Linha 3: Notas
+        ttk.Label(add_frame, text="Notas:").grid(row=3, column=0, sticky=tk.W, padx=5, pady=5)
+        self.figura_notas = ttk.Entry(add_frame, width=30)
+        self.figura_notas.grid(row=3, column=1, columnspan=3, sticky=tk.EW, padx=5, pady=5)
+
+        # Linha 4: Botão adicionar
+        ttk.Button(add_frame, text="Adicionar Figura", command=self.adicionar_figura).grid(
+            row=4, column=0, columnspan=4, pady=10
+        )
+
+        # Configurar grid para expandir
+        add_frame.columnconfigure(1, weight=1)
+        add_frame.columnconfigure(3, weight=1)
 
         # Frame de lista de figuras
         lista_frame = ttk.LabelFrame(figures_frame, text="Figuras Cadastradas", padding=10)
@@ -1161,54 +1187,149 @@ EMPRESAS ASSOCIADAS ({len(resultado['empresas_associadas'])}):
     def adicionar_associacao_dialog(self):
         """Diálogo para adicionar associação pessoa-empresa"""
         dialog = tk.Toplevel(self.root)
-        dialog.title("Adicionar Associação")
-        dialog.geometry("500x400")
+        dialog.title("Adicionar Associação Pessoa-Empresa")
+        dialog.geometry("550x500")
 
-        ttk.Label(dialog, text="Nome da Pessoa:").grid(row=0, column=0, padx=5, pady=5, sticky=tk.W)
-        nome_entry = ttk.Entry(dialog, width=40)
-        nome_entry.grid(row=0, column=1, padx=5, pady=5)
+        # Título
+        ttk.Label(
+            dialog,
+            text="Nova Associação",
+            font=('Arial', 12, 'bold')
+        ).grid(row=0, column=0, columnspan=2, pady=10)
 
-        ttk.Label(dialog, text="Cargo Político:").grid(row=1, column=0, padx=5, pady=5, sticky=tk.W)
-        cargo_entry = ttk.Entry(dialog, width=40)
-        cargo_entry.grid(row=1, column=1, padx=5, pady=5)
+        # Nome da Pessoa (com autocomplete)
+        ttk.Label(dialog, text="Nome da Pessoa:").grid(row=1, column=0, padx=5, pady=5, sticky=tk.W)
+        nome_entry = AutocompleteEntry(
+            dialog,
+            suggestions_callback=self.suggestions_manager.get_pessoas,
+            width=37
+        )
+        nome_entry.grid(row=1, column=1, padx=5, pady=5)
 
-        ttk.Label(dialog, text="Empresa:").grid(row=2, column=0, padx=5, pady=5, sticky=tk.W)
-        empresa_entry = ttk.Entry(dialog, width=40)
-        empresa_entry.grid(row=2, column=1, padx=5, pady=5)
+        # Cargo Governamental (com autocomplete)
+        ttk.Label(dialog, text="Cargo Governamental:").grid(row=2, column=0, padx=5, pady=5, sticky=tk.W)
+        cargo_entry = AutocompleteEntry(
+            dialog,
+            suggestions_callback=self.suggestions_manager.get_cargos,
+            width=37
+        )
+        cargo_entry.grid(row=2, column=1, padx=5, pady=5)
 
-        ttk.Label(dialog, text="Tipo Relação:").grid(row=3, column=0, padx=5, pady=5, sticky=tk.W)
-        tipo_combo = ttk.Combobox(dialog, width=37)
+        # Partido (com autocomplete)
+        ttk.Label(dialog, text="Partido:").grid(row=3, column=0, padx=5, pady=5, sticky=tk.W)
+        partido_entry = AutocompleteEntry(
+            dialog,
+            suggestions_callback=self.suggestions_manager.get_partidos,
+            width=37
+        )
+        partido_entry.grid(row=3, column=1, padx=5, pady=5)
+
+        # Separador
+        ttk.Separator(dialog, orient='horizontal').grid(row=4, column=0, columnspan=2, sticky='ew', pady=10)
+
+        # Empresa (com autocomplete)
+        ttk.Label(dialog, text="Empresa:").grid(row=5, column=0, padx=5, pady=5, sticky=tk.W)
+        empresa_entry = AutocompleteEntry(
+            dialog,
+            suggestions_callback=self.suggestions_manager.get_empresas,
+            width=37
+        )
+        empresa_entry.grid(row=5, column=1, padx=5, pady=5)
+
+        # Tipo de Relação
+        ttk.Label(dialog, text="Tipo de Relação:").grid(row=6, column=0, padx=5, pady=5, sticky=tk.W)
+        tipo_combo = ttk.Combobox(dialog, width=35, state='readonly')
         tipo_combo['values'] = ['dono', 'socio', 'gerente', 'administrador', 'familiar', 'outro']
         tipo_combo.set('socio')
-        tipo_combo.grid(row=3, column=1, padx=5, pady=5)
+        tipo_combo.grid(row=6, column=1, padx=5, pady=5)
 
-        ttk.Label(dialog, text="Fonte:").grid(row=4, column=0, padx=5, pady=5, sticky=tk.W)
+        # Fonte
+        ttk.Label(dialog, text="Fonte (opcional):").grid(row=7, column=0, padx=5, pady=5, sticky=tk.W)
         fonte_entry = ttk.Entry(dialog, width=40)
-        fonte_entry.grid(row=4, column=1, padx=5, pady=5)
+        fonte_entry.grid(row=7, column=1, padx=5, pady=5)
+
+        # Informação
+        info_text = """
+ℹ️ Esta associação irá:
+• Adicionar a pessoa como Figura de Interesse (se não existir)
+• Adicionar a empresa como Figura de Interesse (se não existir)
+• Criar ligação entre pessoa e empresa
+• Permitir pesquisa expandida (pessoa → todos contratos da empresa)
+        """
+        info_label = ttk.Label(dialog, text=info_text, foreground='blue')
+        info_label.grid(row=8, column=0, columnspan=2, padx=10, pady=10)
 
         def guardar():
+            nome_pessoa = nome_entry.get().strip()
+            cargo = cargo_entry.get().strip() or None
+            partido = partido_entry.get().strip() or None
+            empresa = empresa_entry.get().strip()
+            tipo_relacao = tipo_combo.get()
+            fonte = fonte_entry.get().strip() or None
+
+            if not nome_pessoa:
+                messagebox.showwarning("Aviso", "Nome da pessoa é obrigatório!")
+                return
+
+            if not empresa:
+                messagebox.showwarning("Aviso", "Nome da empresa é obrigatório!")
+                return
+
             try:
-                # Adicionar pessoa
-                pessoa_id = self.associations_manager.adicionar_pessoa(
-                    nome=nome_entry.get(),
-                    cargo_politico=cargo_entry.get()
+                # 1. Adicionar pessoa como figura de interesse (se não existir)
+                pessoa_id = self.entities_manager.adicionar_figura(
+                    nome=nome_pessoa,
+                    tipo='pessoa',
+                    notas=f"Associado a {empresa}",
+                    cargo_governamental=cargo,
+                    partido=partido
                 )
 
-                # Adicionar associação
+                # 2. Adicionar empresa como figura de interesse (se não existir)
+                empresa_id = self.entities_manager.adicionar_figura(
+                    nome=empresa,
+                    tipo='empresa',
+                    notas=f"Associado a {nome_pessoa}"
+                )
+
+                # 3. Adicionar pessoa ao sistema de associações
+                assoc_pessoa_id = self.associations_manager.adicionar_pessoa(
+                    nome=nome_pessoa,
+                    cargo_politico=cargo
+                )
+
+                # 4. Criar associação pessoa-empresa
                 self.associations_manager.associar_pessoa_empresa(
-                    pessoa_id=pessoa_id,
-                    empresa_nome=empresa_entry.get(),
-                    tipo_relacao=tipo_combo.get(),
-                    fonte=fonte_entry.get()
+                    pessoa_id=assoc_pessoa_id,
+                    empresa_nome=empresa,
+                    tipo_relacao=tipo_relacao,
+                    fonte=fonte
                 )
 
-                messagebox.showinfo("Sucesso", "Associação adicionada!")
+                messagebox.showinfo(
+                    "Sucesso",
+                    f"✓ Associação criada!\n\n"
+                    f"Pessoa: {nome_pessoa} (ID: {pessoa_id})\n"
+                    f"Empresa: {empresa} (ID: {empresa_id})\n\n"
+                    f"Ambos foram adicionados como Figuras de Interesse."
+                )
+
+                # Atualizar listas e cache
+                self.atualizar_lista_figuras()
+                self.suggestions_manager.limpar_cache()
+
                 dialog.destroy()
 
             except Exception as e:
+                logger.error(f"Erro ao adicionar associação: {e}")
                 messagebox.showerror("Erro", f"Erro: {e}")
 
-        ttk.Button(dialog, text="Guardar", command=guardar).grid(row=5, column=0, columnspan=2, pady=20)
+        # Botões
+        button_frame = ttk.Frame(dialog)
+        button_frame.grid(row=9, column=0, columnspan=2, pady=15)
+
+        ttk.Button(button_frame, text="Cancelar", command=dialog.destroy).pack(side=tk.LEFT, padx=5)
+        ttk.Button(button_frame, text="Guardar Associação", command=guardar).pack(side=tk.LEFT, padx=5)
 
     def detectar_conflitos_interesse(self):
         """Detecta conflitos de interesse"""
@@ -1449,6 +1570,26 @@ Link BASE: {contrato.get('link_base', 'N/D')}
 
     # ==================== MÉTODOS DE FIGURAS ====================
 
+    def _on_tipo_figura_changed(self, event=None):
+        """Mostra/esconde campos baseado no tipo selecionado"""
+        tipo = self.figura_tipo.get()
+
+        if tipo == 'pessoa':
+            # Mostrar campos de cargo e partido
+            self.label_cargo.grid()
+            self.figura_cargo.grid()
+            self.label_partido.grid()
+            self.figura_partido.grid()
+        else:
+            # Esconder campos de cargo e partido para empresas/entidades
+            self.label_cargo.grid_remove()
+            self.figura_cargo.grid_remove()
+            self.label_partido.grid_remove()
+            self.figura_partido.grid_remove()
+            # Limpar valores
+            self.figura_cargo.delete(0, tk.END)
+            self.figura_partido.delete(0, tk.END)
+
     def adicionar_figura(self):
         """Adiciona uma nova figura de interesse"""
         nome = self.figura_nome.get().strip()
@@ -1456,12 +1597,21 @@ Link BASE: {contrato.get('link_base', 'N/D')}
         tipo = self.figura_tipo.get()
         notas = self.figura_notas.get().strip()
 
+        # Campos adicionais para pessoas
+        cargo = None
+        partido = None
+        if tipo == 'pessoa':
+            cargo = self.figura_cargo.get().strip() or None
+            partido = self.figura_partido.get().strip() or None
+
         if not nome:
             messagebox.showwarning("Aviso", "O nome é obrigatório!")
             return
 
         try:
-            figura_id = self.entities_manager.adicionar_figura(nome, nif, tipo, notas)
+            figura_id = self.entities_manager.adicionar_figura(
+                nome, nif, tipo, notas, cargo, partido
+            )
             messagebox.showinfo("Sucesso", f"Figura '{nome}' adicionada com ID {figura_id}")
 
             # Limpar campos
@@ -1469,9 +1619,14 @@ Link BASE: {contrato.get('link_base', 'N/D')}
             self.figura_nif.delete(0, tk.END)
             self.figura_tipo.set('pessoa')
             self.figura_notas.delete(0, tk.END)
+            self.figura_cargo.delete(0, tk.END)
+            self.figura_partido.delete(0, tk.END)
+            self._on_tipo_figura_changed()  # Resetar visibilidade
 
             # Atualizar lista
             self.atualizar_lista_figuras()
+            # Limpar cache de sugestões para incluir novos valores
+            self.suggestions_manager.limpar_cache()
 
         except Exception as e:
             logger.error(f"Erro ao adicionar figura: {e}")
