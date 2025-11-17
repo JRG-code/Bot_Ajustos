@@ -74,18 +74,47 @@ python build_executable.py
 
 ## 🔧 Troubleshooting
 
-**Problema:** Duplo clique abre e fecha imediatamente
+### **Problema:** Duplo clique no launcher.pyw não faz nada
 
-**Solução:**
-1. Verifique se Python está instalado: `python --version`
-2. Instale dependências: `pip install -r requirements.txt`
-3. Se continuar com problema, veja o log: `logs/app.log`
+**SOLUÇÃO RÁPIDA:**
 
-**Problema:** Python não encontrado
+1. **Duplo clique em `diagnostico.py`** ← Mostra exatamente o que está errado!
+
+   O diagnóstico verifica:
+   - ✓ Python instalado?
+   - ✓ Todas as dependências instaladas?
+   - ✓ Ficheiros do projeto existem?
+   - ✓ Onde está o erro exato?
+
+2. **Se faltar dependências:**
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+3. **Se continuar com problema:**
+   - Veja `logs/app.log` (detalhes completos)
+   - Veja `logs/erro_launcher.txt` (se existir)
+
+### **Problema:** Python não encontrado
 
 **Solução:**
 - Instale Python 3.10+ de https://www.python.org/downloads/
 - Durante instalação, marque ✅ "Add Python to PATH"
+- Depois instale dependências: `pip install -r requirements.txt`
+
+### **Problema:** "No module named 'tkinter'"
+
+**Solução (Windows):**
+- Reinstale Python marcando "tcl/tk and IDLE" durante instalação
+
+**Solução (Linux):**
+```bash
+# Ubuntu/Debian
+sudo apt-get install python3-tk
+
+# Fedora
+sudo dnf install python3-tkinter
+```
 
 ---
 
