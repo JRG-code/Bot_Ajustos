@@ -79,12 +79,25 @@ class DatabaseManager:
                     nome TEXT NOT NULL,
                     nif TEXT,
                     tipo TEXT CHECK(tipo IN ('pessoa', 'empresa', 'entidade_publica')),
+                    cargo_governamental TEXT,
+                    partido TEXT,
                     notas TEXT,
                     ativo BOOLEAN DEFAULT 1,
                     data_adicao TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     UNIQUE(nome, nif)
                 )
             """)
+
+            # Migração: Adicionar colunas se não existirem (para BDs antigas)
+            try:
+                cursor.execute("ALTER TABLE figuras_interesse ADD COLUMN cargo_governamental TEXT")
+            except sqlite3.OperationalError:
+                pass  # Coluna já existe
+
+            try:
+                cursor.execute("ALTER TABLE figuras_interesse ADD COLUMN partido TEXT")
+            except sqlite3.OperationalError:
+                pass  # Coluna já existe
 
             # Tabela de conexões entre entidades
             cursor.execute("""
@@ -267,7 +280,9 @@ class DatabaseManager:
     # ==================== FIGURAS DE INTERESSE ====================
 
     def adicionar_figura_interesse(self, nome: str, nif: Optional[str] = None,
-                                   tipo: str = 'pessoa', notas: str = '') -> int:
+                                   tipo: str = 'pessoa', notas: str = '',
+                                   cargo_governamental: Optional[str] = None,
+                                   partido: Optional[str] = None) -> int:
         """
         Adiciona uma figura de interesse
 
@@ -276,6 +291,8 @@ class DatabaseManager:
             nif: NIF da entidade (opcional)
             tipo: Tipo da entidade (pessoa, empresa, entidade_publica)
             notas: Notas adicionais
+            cargo_governamental: Cargo governamental se aplicável (opcional)
+            partido: Partido político se aplicável (opcional)
 
         Returns:
             ID da figura inserida ou existente
@@ -284,9 +301,9 @@ class DatabaseManager:
 
         try:
             cursor.execute("""
-                INSERT INTO figuras_interesse (nome, nif, tipo, notas)
-                VALUES (?, ?, ?, ?)
-            """, (nome, nif, tipo, notas))
+                INSERT INTO figuras_interesse (nome, nif, tipo, notas, cargo_governamental, partido)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (nome, nif, tipo, notas, cargo_governamental, partido))
             self.connection.commit()
             figura_id = cursor.lastrowid
             logger.info(f"Figura de interesse '{nome}' adicionada com ID {figura_id}")
