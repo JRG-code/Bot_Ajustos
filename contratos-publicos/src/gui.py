@@ -674,20 +674,24 @@ class ContratosPublicosGUI:
         self.import_size_limit.insert(0, "500")
         self.import_size_limit.pack(anchor=tk.W, pady=5)
 
-        # Botão de importar
+        # Frame horizontal para botão e barra de progresso lado a lado
+        action_progress_frame = ttk.Frame(import_frame)
+        action_progress_frame.pack(fill=tk.X, padx=40, pady=20)
+
+        # Botão de importar (esquerda)
         ttk.Button(
-            import_frame,
+            action_progress_frame,
             text="Iniciar Importação",
             command=self.iniciar_importacao
-        ).pack(pady=20)
+        ).pack(side=tk.LEFT, padx=(0, 20))
 
-        # Frame de progresso
-        progress_frame = ttk.LabelFrame(import_frame, text="Progresso", padding=10)
-        progress_frame.pack(fill=tk.X, padx=40, pady=(0, 10))
+        # Frame de progresso (direita, expande)
+        progress_container = ttk.Frame(action_progress_frame)
+        progress_container.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
         # Barra de progresso
         self.import_progressbar = ttk.Progressbar(
-            progress_frame,
+            progress_container,
             mode='determinate',
             maximum=100
         )
@@ -695,17 +699,24 @@ class ContratosPublicosGUI:
 
         # Label de status
         self.import_progress_label = ttk.Label(
-            progress_frame,
+            progress_container,
             text="Aguardando início da importação...",
             font=('Arial', 9)
         )
-        self.import_progress_label.pack()
+        self.import_progress_label.pack(anchor=tk.W)
 
-        # Área de log
+        # Área de log com tamanho mínimo e scrollbar
         log_frame = ttk.LabelFrame(import_frame, text="Log de Importação", padding=10)
-        log_frame.pack(fill=tk.BOTH, expand=True, padx=40, pady=10)
+        log_frame.pack(fill=tk.BOTH, expand=True, padx=40, pady=(0, 10))
 
-        self.import_log = scrolledtext.ScrolledText(log_frame, height=10, wrap=tk.WORD)
+        # ScrolledText já inclui scrollbar vertical automática
+        self.import_log = scrolledtext.ScrolledText(
+            log_frame,
+            height=15,  # Altura mínima de 15 linhas
+            width=80,   # Largura mínima
+            wrap=tk.WORD,
+            font=('Courier', 9)
+        )
         self.import_log.pack(fill=tk.BOTH, expand=True)
 
 
