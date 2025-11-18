@@ -53,11 +53,11 @@ class ContratosPublicosGUI:
         # Criar interface
         self.create_widgets()
 
-        # Atualizar dados iniciais
-        self.atualizar_dashboard()
-
         # Configurar evento de fecho
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+
+        # Atualizar dados iniciais (após criar todos os widgets)
+        self.atualizar_dashboard()
 
     def setup_styles(self):
         """Configura estilos da interface"""
@@ -2827,8 +2827,9 @@ Funcionalidades:
 
     def update_status(self, mensagem: str):
         """Atualiza a barra de status"""
-        self.status_bar.config(text=mensagem)
-        self.root.update()
+        if hasattr(self, 'status_bar'):
+            self.status_bar.config(text=mensagem)
+            self.root.update()
 
     def on_closing(self):
         """Método chamado ao fechar a aplicação"""
