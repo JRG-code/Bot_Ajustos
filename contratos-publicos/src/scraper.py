@@ -152,9 +152,12 @@ class ContratosPublicosScraper:
             Caminho do ficheiro descarregado ou None
         """
         try:
-            # URL base de exportação do Portal BASE
-            # Baseado em: https://www.base.gov.pt/Base4/pt/resultados/?type=csv_contratos
-            base_url = "https://www.base.gov.pt/Base4/pt/resultados/"
+            # URLs alternativos do Portal BASE (tentar em ordem)
+            urls_to_try = [
+                "https://www.base.gov.pt/Base4/pt/resultados/",
+                "https://www.base.gov.pt/base4/pt/resultados/",
+                "http://www.base.gov.pt/Base4/pt/resultados/",
+            ]
 
             params = {
                 'type': 'csv_contratos',
@@ -173,11 +176,43 @@ class ContratosPublicosScraper:
             logger.info(f"A descarregar contratos do Portal BASE (ano: {ano or 'todos'})")
             logger.info("ATENÇÃO: Downloads grandes podem demorar vários minutos...")
 
-            self._rate_limit()
+            response = None
+            last_error = None
 
-            # Fazer o pedido
-            response = self.session.get(base_url, params=params, stream=True, timeout=120)
-            response.raise_for_status()
+            # Tentar cada URL
+            for base_url in urls_to_try:
+                try:
+                    logger.info(f"Tentando: {base_url}")
+                    self._rate_limit()
+
+                    # Fazer o pedido com timeout maior e headers adequados
+                    headers = {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                        'Accept': 'text/csv,application/csv,text/plain,*/*',
+                        'Accept-Language': 'pt-PT,pt;q=0.9,en;q=0.8',
+                    }
+
+                    response = self.session.get(
+                        base_url,
+                        params=params,
+                        stream=True,
+                        timeout=180,  # 3 minutos
+                        headers=headers,
+                        verify=True  # Verificar SSL
+                    )
+                    response.raise_for_status()
+
+                    logger.info(f"✓ Conexão bem-sucedida: {base_url}")
+                    break  # Sucesso, sair do loop
+
+                except Exception as e:
+                    last_error = str(e)
+                    logger.warning(f"✗ Falhou {base_url}: {e}")
+                    continue
+
+            if response is None or response.status_code != 200:
+                logger.error(f"Todas as URLs falharam. Último erro: {last_error}")
+                return None
 
             if not output_path:
                 sufixo = f"_{ano}" if ano else "_completo"
@@ -207,14 +242,30 @@ class ContratosPublicosScraper:
                             if chunks_downloaded % 1000 == 0:
                                 logger.info(f"Downloaded {chunks_downloaded} chunks...")
 
+            file_size = output_path.stat().st_size
+
+            # Verificar se ficheiro não está vazio
+            if file_size == 0:
+                logger.error("Ficheiro descarregado está vazio")
+                output_path.unlink()  # Apagar ficheiro vazio
+                return None
+
             logger.info(f"CSV descarregado com sucesso: {output_path}")
-            logger.info(f"Tamanho final: {output_path.stat().st_size / 1024 / 1024:.2f} MB")
+            logger.info(f"Tamanho final: {file_size / 1024 / 1024:.2f} MB")
 
             return output_path
 
         except requests.exceptions.Timeout:
             logger.error("Timeout ao descarregar dados - o ficheiro pode ser muito grande")
             logger.info("Tente usar um ano específico ou contactar o BASE para obter os dados")
+            return None
+        except requests.exceptions.ConnectionError as e:
+            logger.error(f"Erro de conexão: {e}")
+            logger.info("Verifique sua conexão à internet e se o Portal BASE está acessível")
+            return None
+        except requests.exceptions.HTTPError as e:
+            logger.error(f"Erro HTTP {e.response.status_code}: {e}")
+            logger.info("O Portal BASE pode estar indisponível ou a rejeitar pedidos")
             return None
         except Exception as e:
             logger.error(f"Erro ao descarregar do BASE: {e}")
