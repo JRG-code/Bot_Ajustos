@@ -19,7 +19,6 @@ from sync import SyncManager
 from suspicious_patterns import SuspiciousPatternDetector, LimitesLegais, analisar_todos_contratos
 from associations import AssociationsManager
 from autocomplete import AutocompleteEntry, SuggestionsManager
-from updater import check_for_updates, get_current_version, get_update_info_json
 
 logger = logging.getLogger(__name__)
 
@@ -267,8 +266,6 @@ class ContratosPublicosGUI:
         # Menu Ajuda
         help_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Ajuda", menu=help_menu)
-        help_menu.add_command(label="Verificar Atualizações", command=self.verificar_atualizacoes)
-        help_menu.add_separator()
         help_menu.add_command(label="Sobre", command=self.mostrar_sobre)
 
     def create_dashboard_tab(self):
@@ -2625,10 +2622,9 @@ TOP 5 PARCEIROS:
 
     def mostrar_sobre(self):
         """Mostra informações sobre a aplicação"""
-        current_version = get_current_version()
-        about_text = f"""
+        about_text = """
 Monitor de Contratos Públicos
-Versão {current_version}
+Versão 1.0.3
 
 Aplicação para monitorização de contratos públicos
 portugueses do Portal BASE (www.base.gov.pt)
@@ -2647,52 +2643,6 @@ Funcionalidades:
         """
 
         messagebox.showinfo("Sobre", about_text)
-
-    def verificar_atualizacoes(self):
-        """Verifica se há atualizações disponíveis no GitHub"""
-        self.update_status("A verificar atualizações...")
-
-        try:
-            # Executar verificação em thread separada para não bloquear UI
-            def _check():
-                update_info = check_for_updates()
-
-                def _show_result():
-                    if update_info:
-                        # Nova versão disponível
-                        msg = f"""
-Nova versão disponível!
-
-Versão atual: {update_info['current_version']}
-Nova versão: {update_info['version']}
-
-Notas da versão:
-{update_info['release_notes'][:300]}...
-
-Deseja abrir a página de download?
-                        """
-                        if messagebox.askyesno("Atualização Disponível", msg):
-                            import webbrowser
-                            webbrowser.open(update_info['download_url'])
-                    else:
-                        # Já está atualizado
-                        current = get_current_version()
-                        messagebox.showinfo(
-                            "Atualizado",
-                            f"Você já está usando a versão mais recente!\n\nVersão: {current}"
-                        )
-
-                    self.update_status("Pronto")
-
-                self.root.after(0, _show_result)
-
-            thread = threading.Thread(target=_check, daemon=True)
-            thread.start()
-
-        except Exception as e:
-            logger.error(f"Erro ao verificar atualizações: {e}")
-            messagebox.showerror("Erro", f"Erro ao verificar atualizações:\n{e}")
-            self.update_status("Pronto")
 
     # ==================== MÉTODOS DE GRAFO DE LIGAÇÕES ====================
 

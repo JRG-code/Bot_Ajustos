@@ -1,0 +1,17 @@
+{
+  "version": "1.0.3",
+  "download_url": "https://github.com/JRG-code/Bot_Ajustos/archive/refs/tags/v1.0.3.zip",
+  "requires": "3.8",
+  "tested": "3.12",
+  "last_updated": "2025-01-18",
+  "upgrade_notice": "Nova versão 1.0.3 com visualização de ligações em grafo",
+  "author": "JRG-code",
+  "author_homepage": "https://github.com/JRG-code",
+  "name": "Monitor de Contratos Públicos",
+  "slug": "contratos-publicos",
+  "homepage": "https://github.com/JRG-code/Bot_Ajustos",
+  "sections": {
+    "description": "Aplicação para monitorização de contratos públicos portugueses do Portal BASE",
+    "changelog": "<h4>1.0.3</h4><ul><li>Adicionar visualização de ligações em grafo</li><li>Corrigir erro de importação do Portal BASE</li><li>Adicionar barra de progresso visual</li><li>Melhorar sistema de lançamento</li></ul>"
+  }
+}
