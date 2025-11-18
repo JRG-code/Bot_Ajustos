@@ -688,6 +688,15 @@ class ContratosPublicosGUI:
             command=self.iniciar_importacao
         ).pack(side=tk.LEFT, padx=(0, 20))
 
+        # Spinner/rodinha de loading (entre botão e barra de progresso)
+        self.import_spinner = ttk.Progressbar(
+            action_progress_frame,
+            mode='indeterminate',
+            length=30
+        )
+        self.import_spinner.pack(side=tk.LEFT, padx=(0, 20))
+        self.import_spinner.pack_forget()  # Esconder inicialmente
+
         # Frame de progresso (direita, expande)
         progress_container = ttk.Frame(action_progress_frame)
         progress_container.pack(side=tk.LEFT, fill=tk.X, expand=True)
@@ -2395,6 +2404,10 @@ TOP 5 PARCEIROS:
         self.log_import(f"Limite de registos: {limite or 'Sem limite'}")
         self.log_import(f"Limite de tamanho: {limite_tamanho_mb or 'Sem limite'} MB\n")
 
+        # Mostrar spinner/rodinha de loading
+        self.import_spinner.pack(side=tk.LEFT, padx=(0, 20))
+        self.import_spinner.start(10)  # Velocidade da animação
+
         # Executar em thread separada para não bloquear a UI
         thread = threading.Thread(
             target=self._executar_importacao,
@@ -2569,6 +2582,19 @@ TOP 5 PARCEIROS:
     def update_import_progress(self, percentage: float, status: str):
         """Atualiza a barra de progresso da importação (thread-safe)"""
         def _update():
+            # Esconder spinner em várias situações
+            should_hide_spinner = (
+                percentage > 0 or  # Progresso real começou
+                percentage >= 100 or  # Concluído
+                "cancelada" in status.lower() or  # Cancelado
+                "erro" in status.lower()  # Erro
+            )
+
+            if should_hide_spinner and self.import_spinner.winfo_ismapped():
+                self.import_spinner.stop()
+                self.import_spinner.pack_forget()
+
+            # Atualizar barra de progresso
             self.import_progressbar['value'] = percentage
             self.import_progress_label['text'] = f"{percentage:.1f}% - {status}"
 
